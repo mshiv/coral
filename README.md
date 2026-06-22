@@ -14,38 +14,58 @@ Predict flood depth fields and/or summary inundation metrics from:
 
 The emulator will be trained on a dataset generated from physics-based simulations and evaluated on held-out scenarios and historical events with observational constraints.
 
-## Repository Layout
+## Repo Layout
 
-- `src/coral/` # the installable package (`pip install -e .`)
-  - `preprocess/` # clip DEM, Manning grid, coastline gauges/bci 
-  - `couple/` # GeoClaw -> LISFLOOD-FP to create the storm surge boundary conditions, `.bdy`
-  - `geoclaw/` # run-dir assembly
-  - `lisflood/` # run-dir assembly
-  - `postprocess/` # COG, Zarr, animation, maps, hazard
-  - `validate/` # HWM + gauge/surge calibration
-  - `viz/` # AMR/domain/QC figures
-  - `emulator/` # the ML model
-- `configs/` # scenario YAMLs (`base.yaml` + `scenarios/*.yaml`) and `hpc/` profiles; one file per scenario
-- `templates/` # jinja templates (`savannah.par.j2`, setrun) rendered from a scenario config
-- `workflows/` # `Snakefile` pipeline + `slurm/` submit scripts
-- `patches/` + `docs/LISFLOOD_build.md` # LISFLOOD-FP source fixes (stock 8.0.3 segfaults) as patch + fork/submodule
-- `notebooks/` — exploration (Zarr, emulator dev)
-- `data/` , `runs/` # gitignored; input data files and generated HPC run dirs/outputs
-- `docs/` # methods, HPC setup, data dictionary, migration status
+```Shell
+/coral/
+├── data/
+    ├── raw/
+    ├── external/
+    ├── interim/
+    ├── processed/
+    ├── tmp/
+├── notebooks/ # Data exploration notebooks
+├── configs/ # YAML files for experiment scenarios (`base.yaml` + `scenarios/*.yaml`) and `hpc/` profiles - defined for GT PACE, added to default LISFLOOD-FP directory
+├── templates/ # for GeoClaw (setrun) and LISFLOOD-FP (.par) run scripts, rendered from scenario config files
+├── workflows/ # `Snakefile` pipeline and `slurm/` job submit scripts (and some older shell scripts, to be migrated)
+├── runs/ # GeoClaw and LISFLOOD-FP model run directories, with full inputs and outputs, one for each scenario
+├── docs/ # methods, HPC setup, data dictionary, status, bug fixes and patches etc
+├── src/coral/ # installable package 
+    ├── preprocess/ # clip DEM, Manning grid, coastline gauges/bci etc.
+    ├── couple/ # boundary conditions coupling script for the storm surge file (`.bdy`) GeoClaw -> LISFLOOD-FP
+    ├── geoclaw/ # run dir assembly scripts
+    ├── lisflood-fp/ # run-dir assembly scripts
+    ├── postprocess/ ## COG, Zarr, animation, maps, csv/json generation for CHORUS front-end tooling
+    ├── validate/ # HWM + gauge/surge calibration scripts
+    ├── viz/ # plotting scripts
+    ├── emulator/ # ML model code
 
-## Workflow (config-driven)
+```
 
-Each run is one scenario YAML. Example:
+
+## Setup and workflow in general
+
+Each run is based on a scenario YAML. 
+
+Example:
 ```bash
 pip install -e .
-coral show       configs/scenarios/savannah_matthew_LR.yaml      # resolved config
+coral show       configs/scenarios/savannah_matthew_LR.yaml     
 coral render-par configs/scenarios/savannah_matthew_LR.yaml runs/sav/savannah.par
 coral build-bdy  configs/scenarios/savannah_matthew_LR.yaml <geoclaw_output> <bci_in> runs/sav/inputs
 # full pipeline / sweeps:
-snakemake -c1 all                # every scenario in configs/scenarios/
+snakemake -c1 all                # every scenario to be listed in configs/scenarios/
 ```
-Each new scenario (different storm, Manning, SLR, drag, resolution) will require that you copy one YAML and
-change a field. The scenario set doubles as the ML emulator's training index. See`docs/LISFLOOD_build.md` to build the solver (it includes bug fixes and patches for building on the GT PACE cluster).
+
+Each new scenario (different storm, Manning, SLR, drag, resolution) will require that you copy one YAML and change a field. 
+The scenario set doubles as the ML emulator's training index. See`docs/LISFLOOD_build.md` to build the solver (it includes bug fixes and patches for compiling on the GT PACE cluster). 
+I made use of a an existing `spack` environment on my PACE account with compatible dependencies.
+
+Details on setting such an environment up can be found on this GT Github (you'll need an account), detailed for an ice sheet model: 
+https://github.gatech.edu/smurugan9/software-build-doc/blob/main/MALI/build-notes.md
+
+Will migrate this to its own env and docs once the workflow is setup, and will be stored here:
+https://github.gatech.edu/smurugan9/build-docs
 
 ## Milestones
 
