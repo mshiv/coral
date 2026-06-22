@@ -4,6 +4,8 @@
 
 This project develops a machine-learning emulator for coupled coastal flooding simulations over Savannah, Georgia in the Southeastern USA. The goal is to approximate expensive physics-based GeoClaw-LISFLOOD-FP outputs with a fast surrogate model that can explore many storm, sea-level-rise, and (bathymetric) intervention scenarios.
 
+![flood animation](./assets/flood.gif)
+
 ## Project Goal
 
 Predict flood depth fields and/or summary inundation metrics from:
