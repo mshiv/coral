@@ -1,0 +1,13 @@
+# Savannah / Pin Point — Hurricane Matthew 2016, low-res baseline (the run we did).
+name: savannah_matthew_LR
+domain:
+  dem:   data/raw/ga_cudem_30m.asc
+  bbox:  [-81.22, -80.82, 31.82, 32.08]   # W, E, S, N
+  res_m: 30
+  ref_point: [-81.137, 31.944]            # Pin Point
+geoclaw:
+  storm: matthew
+  drag: garratt
+  sea_level: 0.81
+  refine_box: [-81.111, -80.819, 31.804, 32.100]
+# coupling / manning / lisflood / forcing / hpc inherited from base.yaml

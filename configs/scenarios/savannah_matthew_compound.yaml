@@ -1,0 +1,17 @@
+# Matthew 2016 over Savannah, COMPOUND: storm surge + AORC rainfall (Sarhadi-style).
+# Same domain/surge as the LR baseline; adds rainfall forcing into LISFLOOD.
+name: savannah_matthew_compound
+domain:
+  dem:   data/raw/ga_cudem_30m.asc
+  bbox:  [-81.22, -80.82, 31.82, 32.08]
+  res_m: 30
+  ref_point: [-81.137, 31.944]
+geoclaw:
+  refine_box: [-81.111, -80.819, 31.804, 32.100]
+coupling:
+  landfall_utc: "2016-10-08T06:00:00"   # GeoClaw t=0 (Matthew closest approach, Savannah)
+forcing:
+  rainfall: aorc        # compound forcing (AORC)
+  rain_mode: uniform    # uniform now; dynamic spatial rain pending the netCDF fix
+  infiltration: polaris # POLARIS-soil distributed infiltration (Sarhadi-style)
+  infil_capped: true    # storage-limited (AWC) -> requires the patched lisflood

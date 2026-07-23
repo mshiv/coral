@@ -3,6 +3,35 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# data files
+data/
+
+# Emulator project outputs and archives
+archive/
+results/
+*.joblib
+*.h5
+*.onnx
+*.pkl
+*.nc
+*.nc4
+*.grib
+*.grib2
+*.pdf
+
+# Notebook and editor artifacts
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+.pytest_cache/
+
+# Generated logs / scratch files
+*.log
+tmp/
+temp/
+
+# 9-2025-Fall/
+
 # C extensions
 *.so
 
@@ -205,3 +234,26 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ── CORAL workflow: large data, HPC run dirs, model outputs ──
+runs/                 # generated GeoClaw/LISFLOOD run dirs + outputs (HPC scratch)
+!runs/README.md
+!data/README.md       # keep the fetch-instructions readme even though data/ is ignored
+*.zarr/
+*.tif
+*.asc
+*.wd
+*.wdfp
+*.bdy
+*.mp4
+*.gif
+# orchestration scratch
+.snakemake/
+multirun/
+hydra_outputs/
+# third-party libraries installed in-tree (not vendored)
+hatyan/
+# generated scratch notes at repo root
+/notes.md
+# generated figures under reports/ (keep the README.md files)
+reports/**/*.png

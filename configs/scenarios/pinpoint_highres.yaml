@@ -1,0 +1,23 @@
+# Pin Point building-scale (2 m) clipped LISFLOOD domain, NESTED in the coarse 30 m
+# compound run. GeoClaw is NOT rerun — the clip's boundary WSE(t) is sampled from the
+# coarse compound run via couple/nest_bdy. DEM = NOAA CoNED Coastal GA 1 m topobathy,
+# resampled to 2 m over the clip box. Manning/infiltration are (re)built on the 2 m grid
+# with the existing make_manning / make_infil (they work on any DEM grid).
+#
+# Grid: ~2.8 x 2.9 km at 2 m -> ~1400 x 1450 cells (~2M) — tractable single-node/GPU.
+name: pinpoint_highres
+domain:
+  dem:   data/raw/coned_pinpoint_2m.asc      # clip+resample of CoNED 1 m (see docs)
+  bbox:  [-81.1557, -81.1181, 31.9278, 31.9601]  # connectivity-informed: Pin Point's
+  #        connected creek reaches within ~1.6 km, ~3.5 x 3.6 km (2m -> 3.2M cells)
+  res_m: 2
+  ref_point: [-81.137, 31.944]
+coupling:
+  landfall_utc: "2016-10-08T06:00:00"
+  landfall_s: 172800                          # boundary times on the coarse-run clock
+forcing:
+  rainfall: aorc                              # or mrms (dynamic) after the recompile
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
+# buildings (next layer): FEMA USA Structures -> building-block into the 2 m DEM.

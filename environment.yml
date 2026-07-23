@@ -1,0 +1,48 @@
+# coral conda environment (Python side: preprocess, coupling, emulator).
+# The LISFLOOD-FP C++ build uses a separate spack/gcc/netcdf toolchain — not this.
+#
+#   conda env create -f environment.yml
+#   conda activate coral
+#   pip install -e .            # the coral package (also pulls any pyproject deps)
+#
+# Geospatial libs come from conda-forge (pip GDAL/rasterio is painful). Torch + PyG
+# are intentionally NOT pinned here: install them matched to the machine's CUDA
+# (check `nvidia-smi`), e.g. on a GPU node:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch-geometric
+# (CPU-only preprocessing node: the default CPU torch wheel is fine.)
+#
+# DEFERRED (install only if the GNN needs them): torch-scatter / torch-sparse.
+# Modern PyG (>=2.3) uses torch.scatter_reduce internally, so base torch-geometric
+# covers standard message-passing / GCN / GAT layers. Install these ONLY if a
+# specific layer raises "requires torch-scatter". To match your build, get the tag
+# from `python -c "import torch; print(torch.__version__)"` (e.g. 2.4.1+cu121) and use
+# the major.minor .0 form in the PyG wheel index:
+#   pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.0+cu121.html
+# (browse https://data.pyg.org/whl/ for the exact available torch-X.Y.Z+cuXXX tag).
+name: coral
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - xarray
+  - zarr
+  - rasterio
+  - rioxarray
+  - geopandas       # building footprints (FEMA/MS/OSM) — burn_buildings.py
+  - pyproj
+  - netcdf4
+  - matplotlib
+  - contextily
+  - s3fs
+  - cfgrib          # MRMS radar-QPE rainfall (GRIB2) — fetch_mrms.py
+  - eccodes         # GRIB2 backend for cfgrib
+  - pyyaml
+  - jinja2
+  - hydra-core
+  - typer
+  - requests
+  - pip

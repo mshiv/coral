@@ -1,0 +1,55 @@
+# CORAL scenario pipeline (Snakemake). One scenario end-to-end; scales to many
+# via the `scenarios` wildcard. HPC stages (geoclaw, lisflood) submit via SLURM.
+#
+#   snakemake -c1 deliverables_savannah_matthew_LR          # one scenario
+#   snakemake -c1 all                                       # every config in configs/scenarios
+#   snakemake --profile workflows/slurm                     # on the cluster
+#
+# Local (laptop) stages: clip_dem, boundary, manning, build_bdy, postprocess.
+# HPC stages: geoclaw run, lisflood run (these write into runs/<name>/).
+
+import glob, os
+SCEN = [os.path.splitext(os.path.basename(p))[0]
+        for p in glob.glob("configs/scenarios/*.yaml")]
+
+rule all:
+    input: expand("runs/{s}/deliverables/.done", s=SCEN)
+
+# --- local prep -----------------------------------------------------------
+rule clip_dem:
+    output: "runs/{s}/inputs/SUB_DEM_{s}.asc"
+    shell:  "python -m coral.preprocess.clip_dem --config configs/scenarios/{wildcards.s}.yaml --out {output}"
+
+rule boundary:
+    input:  "runs/{s}/inputs/SUB_DEM_{s}.asc"
+    output: "runs/{s}/inputs/{s}_coastline.bci", "runs/{s}/inputs/geoclaw_gauges.txt"
+    shell:  "python -m coral.preprocess.gen_boundary_points --config configs/scenarios/{wildcards.s}.yaml --dem {input}"
+
+rule manning:
+    input:  dem="runs/{s}/inputs/SUB_DEM_{s}.asc"
+    output: "runs/{s}/inputs/Manning_{s}.asc"
+    shell:  "python -m coral.preprocess.make_manning --config configs/scenarios/{wildcards.s}.yaml --dem {input.dem} --out {output}"
+
+# --- HPC: GeoClaw (assemble run dir from edited setrun + gauges, then submit) ---
+rule geoclaw:
+    input:  gauges="runs/{s}/inputs/geoclaw_gauges.txt"
+    output: directory("runs/{s}/geoclaw_run/_output")
+    shell:  "bash workflows/slurm/run_geoclaw.sh configs/scenarios/{wildcards.s}.yaml"
+
+# --- coupling -------------------------------------------------------------
+rule build_bdy:
+    input:  out="runs/{s}/geoclaw_run/_output", bci="runs/{s}/inputs/{s}_coastline.bci"
+    output: "runs/{s}/inputs/{s}.bdy"
+    shell:  "coral build-bdy configs/scenarios/{wildcards.s}.yaml {input.out} {input.bci} runs/{wildcards.s}/inputs"
+
+# --- HPC: LISFLOOD --------------------------------------------------------
+rule lisflood:
+    input:  "runs/{s}/inputs/{s}.bdy", "runs/{s}/inputs/Manning_{s}.asc"
+    output: "runs/{s}/results/res_{s}.max"
+    shell:  "bash workflows/slurm/run_lisflood.sh configs/scenarios/{wildcards.s}.yaml"
+
+# --- deliverables / figures ----------------------------------------------
+rule deliverables:
+    input:  "runs/{s}/results/res_{s}.max"
+    output: touch("runs/{s}/deliverables/.done")
+    shell:  "python -m coral.postprocess.make_all --config configs/scenarios/{wildcards.s}.yaml"

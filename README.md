@@ -44,7 +44,6 @@ The emulator will be trained on a dataset generated from physics-based simulatio
 
 ```
 
-
 ## Setup and workflow in general
 
 Each run is based on a scenario YAML. 

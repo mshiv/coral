@@ -1,0 +1,29 @@
+# Shared defaults for all scenarios. Scenario files override only what differs.
+geoclaw:
+  storm: matthew
+  drag: garratt
+  sea_level: 0.81
+  amr_max: 6
+coupling:
+  gauge_spacing_m: 400
+  seaward_cells: 3
+  datum_offset_m: 0.071
+  dry_thresh: 0.05
+  landfall_s: 172800        # bdy time-shift origin (so series starts at 0)
+manning:
+  source: nlcd2016
+  sea_level: 0.81
+lisflood:
+  saveint: 1800
+  sim_window_h: [-24, 24]   # relative to landfall
+  initial_tstep: 10.0
+forcing:
+  rainfall: null        # null = surge-only; set to a source (e.g. aorc) for compound
+  rain_mode: uniform    # uniform (rainfile) | dynamic (dynamicrainfile netCDF)
+  infiltration: null    # null = off; polaris = POLARIS-soil distributed infiltration
+  infil_capped: true    # storage-limited (AWC) infiltration -> needs the patched lisflood
+  slr_m: 0.0
+hpc:
+  account: gts-arobel3-atlas
+  partition: cpu-medium
+  lisflood_bin: /storage/home/hcoda1/6/smurugan9/data/software/LISFLOOD-FP-trunk/lisflood

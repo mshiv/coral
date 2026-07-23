@@ -1,0 +1,30 @@
+{# LISFLOOD-FP parameter file, rendered from a scenario config.
+   Times are on the shifted clock: landfall = coupling.landfall_s. #}
+DEMfile        SUB_DEM_{{ name }}.asc
+manningfile    Manning_{{ name }}.asc
+bcifile        {{ name }}_coastline.bci
+bdyfile        {{ name }}.bdy
+{% if forcing.rainfall %}{% if forcing.rain_mode == 'dynamic' %}dynamicrainfile rain_{{ name }}.nc
+{% else %}rainfall       rain_{{ name }}.txt
+{% endif %}{% endif %}{% if forcing.infiltration %}infilfile      infil_{{ name }}.asc
+{% if forcing.infil_capped %}infilcapfile   infilcap_{{ name }}.asc
+{% endif %}{% endif %}
+
+latlong
+sgc_enable
+
+tstart         {{ '%.1f' % tstart }}
+sim_time       {{ '%.1f' % sim_time }}
+initial_tstep  {{ lisflood.initial_tstep }}
+max_Froude     1
+qoutput
+
+massint        1200
+saveint        {{ lisflood.saveint }}
+voutput_max
+hazard
+checkpoint     6
+# netcdf_out   # disabled: segfaults on finalization in this build; use ASCII
+
+dirroot        results_{{ name }}
+resroot        res_{{ name }}

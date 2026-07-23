@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coral"
+version = "0.1.0"
+description = "CORAL/CHORUS coastal-flood workflow: GeoClaw -> LISFLOOD-FP coupling, scenario management, and a flood-depth ML emulator."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Shivaprakash Muruganandham"}]
+license = {text = "MIT"}
+dependencies = [
+    "numpy", "scipy", "xarray", "zarr", "rasterio", "rioxarray",
+    "matplotlib", "contextily", "pyproj", "requests",
+    "pyyaml", "jinja2", "hydra-core", "typer",
+    "s3fs", "pandas",   # AORC rainfall fetch (anonymous S3 Zarr) + time handling
+]
+
+[project.optional-dependencies]
+emulator = ["torch", "torch-geometric"]
+dev = ["snakemake", "pytest", "ruff"]
+
+[project.scripts]
+coral = "coral.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]

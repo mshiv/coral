@@ -1,0 +1,14 @@
+# Example variant: Powell drag + 1 m sea-level rise. Shows how little changes
+# per scenario — copy a file, edit a couple of fields.
+name: savannah_matthew_powell_slr1m
+domain:
+  dem:   data/raw/ga_cudem_30m.asc
+  bbox:  [-81.22, -80.82, 31.82, 32.08]
+  res_m: 30
+  ref_point: [-81.137, 31.944]
+geoclaw:
+  drag: powell                     # <- changed
+  sea_level: 1.81                  # <- 0.81 tide + 1.0 m SLR
+  refine_box: [-81.111, -80.819, 31.804, 32.100]
+forcing:
+  slr_m: 1.0                       # <- changed

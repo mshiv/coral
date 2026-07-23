@@ -1,0 +1,20 @@
+# Matthew 2016 over Savannah — surge + DYNAMIC TIDE (compound coastal water level).
+# The tide ladder's top rung: instead of a static sea_level, the time-varying NOAA
+# Fort Pulaski tide is superposed onto the surge in the .bdy (build_bdy). For this to
+# be clean the surge run is at MSL (geoclaw.sea_level: 0) -> eta is the pure surge
+# residual, and TWL(t) = tide(t) + residual(t). Compare against the static-tide surge
+# run (savannah_matthew_LR, sea_level 0.81) to show the value of a dynamic tide.
+name: savannah_matthew_tide
+domain:
+  dem:   data/raw/ga_cudem_30m.asc
+  bbox:  [-81.22, -80.82, 31.82, 32.08]
+  res_m: 30
+  ref_point: [-81.137, 31.944]
+geoclaw:
+  sea_level: 0.0        # MSL -> pure surge residual (needs a GeoClaw rerun at MSL)
+  refine_box: [-81.111, -80.819, 31.804, 32.100]
+coupling:
+  landfall_utc: "2016-10-08T06:00:00"
+forcing:
+  tide: noaa            # time-varying tide from NOAA CO-OPS (Fort Pulaski)
+  tide_station: "8670870"
