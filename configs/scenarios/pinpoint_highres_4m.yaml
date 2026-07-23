@@ -1,0 +1,20 @@
+# 4 m Pin Point high-res, nested in the 30 m compound run. Running at 4 m with floored
+# bathymetry and a trimmed surge window makes it actually run: LISFLOOD's timestep is
+# CFL*dx/sqrt(g*h), so deep tidal channels (to 10.6 m at 2 m) collapse it. 4 m + DEM
+# floored at -1 m + an 18 h window is ~50x faster. See docs/adaptation_sampling_plan.md.
+name: pinpoint_highres_4m
+domain:
+  dem:   data/raw/coned_pinpoint_4m_floored.asc   # CoNED resampled to 4 m, floored at -1 m
+  bbox:  [-81.1557, -81.1181, 31.9278, 31.9601]
+  res_m: 4
+  ref_point: [-81.137, 31.944]
+coupling:
+  landfall_utc: "2016-10-08T06:00:00"
+  landfall_s: 172800
+lisflood:
+  sim_window_h: [-6, 12]                # ~18 h around landfall (surge peak), not the full 48 h
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true

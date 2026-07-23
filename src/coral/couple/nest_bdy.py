@@ -39,18 +39,23 @@ def _coarse_wse_series(coarse_dir, root, dry_thresh=0.05):
 
 def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
              saveint=1800.0, t0=86400.0, spacing_m=30.0, dry_thresh=0.05,
-             wet_frac=0.25):
+             wet_frac=0.25, inset_deg=1e-5):
     """Build the clip's .bci + .bdy from the coarse run. clip_bbox=[W,E,S,N].
     Boundary points are placed along the clip perimeter every ~spacing_m and kept only
-    where the coarse cell is wet for >= wet_frac of the timesteps (water enters there)."""
+    where the coarse cell is wet for >= wet_frac of the timesteps (water enters there).
+
+    Points are inset from the exact bbox edge by `inset_deg` (about half a clip cell) so
+    they land on the outermost valid clip cells. A point on the exact perimeter maps to a
+    cell index of -1 or n in the high-res clip and makes LISFLOOD segfault."""
     dem, x, y, wse = _coarse_wse_series(coarse_dir, root, dry_thresh)
     T = wse.shape[0]
     W, E, S, N = clip_bbox
+    Wi, Ei, Si, Ni = W + inset_deg, E - inset_deg, S + inset_deg, N - inset_deg
     step_deg = spacing_m / 111000.0
-    # perimeter sample points (lon, lat)
-    xs = np.arange(W, E, step_deg); ys = np.arange(S, N, step_deg)
-    pts = ([(xx, S) for xx in xs] + [(xx, N) for xx in xs] +
-           [(W, yy) for yy in ys] + [(E, yy) for yy in ys])
+    # perimeter sample points (lon, lat), inset onto the outermost valid cells
+    xs = np.arange(Wi, Ei, step_deg); ys = np.arange(Si, Ni, step_deg)
+    pts = ([(xx, Si) for xx in xs] + [(xx, Ni) for xx in xs] +
+           [(Wi, yy) for yy in ys] + [(Ei, yy) for yy in ys])
 
     kept, blocks = [], []
     for lon, lat in pts:
