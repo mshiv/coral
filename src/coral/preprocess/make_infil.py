@@ -39,6 +39,19 @@ def _fetch(url, dest):
     return os.path.getsize(dest) > 1000
 
 
+def _dem_header(dem_path, nodata=-9999):
+    """The DEM's 6 ASCII header lines verbatim. LISFLOOD requires byte-matching grid metadata,
+    so we copy the DEM header rather than rebuild it from the transform (rebuilding rounds the
+    corners/cellsize differently and LISFLOOD then rejects the file). The nodata line is forced
+    to -9999 because these grids fill nodata with -9999."""
+    out = []
+    with open(dem_path) as f:
+        for _ in range(6):
+            ln = f.readline()
+            out.append("NODATA_value -9999\n" if ln.lower().startswith("nodata") else ln)
+    return out
+
+
 def make_infil(bbox, dem_path, out_asc, *, max_rate_mm_hr=None, cap_to_dem=True):
     import rasterio
     from rasterio.merge import merge
@@ -82,14 +95,10 @@ def make_infil(bbox, dem_path, out_asc, *, max_rate_mm_hr=None, cap_to_dem=True)
     if cap_to_dem:
         ksat_mm_hr = np.where(dem == nod, -9999.0, ksat_mm_hr)  # nodata outside domain
 
-    # write ESRI-ASCII with the DEM header (LISFLOOD requires matching grid)
-    x0 = dem_tr.c; cs = dem_tr.a
-    y0 = dem_tr.f + dem_tr.e * dem_h         # yllcorner (e is negative)
+    # copy the DEM's exact header (LISFLOOD requires byte-matching grid metadata)
     Path(out_asc).parent.mkdir(parents=True, exist_ok=True)
     with open(out_asc, "w") as f:
-        f.write(f"ncols        {dem_w}\nnrows        {dem_h}\n")
-        f.write(f"xllcorner    {x0:.8f}\nyllcorner    {y0:.8f}\n")
-        f.write(f"cellsize     {cs:.10f}\nNODATA_value -9999\n")
+        f.writelines(_dem_header(dem_path))
         np.savetxt(f, ksat_mm_hr, fmt="%.4f")
     valid = ksat_mm_hr[ksat_mm_hr > -9990]
     print(f"wrote {out_asc}: {dem_h}x{dem_w}, infil {np.nanmin(valid):.1f}-"
@@ -142,9 +151,7 @@ def make_capacity(bbox, dem_path, out_asc):
     x0 = dem_tr.c; cs = dem_tr.a; y0 = dem_tr.f + dem_tr.e * dem_h
     Path(out_asc).parent.mkdir(parents=True, exist_ok=True)
     with open(out_asc, "w") as f:
-        f.write(f"ncols        {dem_w}\nnrows        {dem_h}\n")
-        f.write(f"xllcorner    {x0:.8f}\nyllcorner    {y0:.8f}\n")
-        f.write(f"cellsize     {cs:.10f}\nNODATA_value -9999\n")
+        f.writelines(_dem_header(dem_path))
         np.savetxt(f, cap_mm, fmt="%.3f")
     v = cap_mm[cap_mm > -9990]
     print(f"wrote {out_asc}: capacity {np.nanmin(v):.1f}-{np.nanmax(v):.1f} mm "
@@ -195,9 +202,7 @@ def make_infil_ssurgo(soils_geojson, ksat_awc_json, dem_path, out_asc,
     x0 = dem_tr.c; cs = dem_tr.a; y0 = dem_tr.f + dem_tr.e * dem_h
     Path(out_asc).parent.mkdir(parents=True, exist_ok=True)
     with open(out_asc, "w") as fh:
-        fh.write(f"ncols        {dem_w}\nnrows        {dem_h}\n")
-        fh.write(f"xllcorner    {x0:.8f}\nyllcorner    {y0:.8f}\n")
-        fh.write(f"cellsize     {cs:.10f}\nNODATA_value -9999\n")
+        fh.writelines(_dem_header(dem_path))
         np.savetxt(fh, grid, fmt="%.4f")
     valid = grid[grid > -9990]
     if valid.size:
