@@ -1,4 +1,4 @@
-"""Geostatistical intervention generator: low-dim knobs -> grid edits.
+"""Geostatistical intervention generator: turns low-dim knobs into grid edits.
 
 random_field / patch_mask draw a spatially-correlated field (Gaussian random field
 via spectral synthesis) and threshold it to a patchy placement mask. Each
@@ -27,7 +27,7 @@ def random_field(shape, corr_len=30.0, seed=0):
 
 # NLCD class groups for land-cover-conditioned siting (from make_manning.NLCD_N)
 NLCD_WETLAND = (90, 95)                 # woody + emergent wetland (existing marsh)
-NLCD_DEVELOPED = (21, 22, 23, 24)       # developed (open -> high intensity)
+NLCD_DEVELOPED = (21, 22, 23, 24)       # developed, open to high intensity
 NLCD_IMPERVIOUS = (22, 23, 24)          # parking lots / roads / dense development
 
 
@@ -45,7 +45,7 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
     - permeable: developed land; depave: impervious/parking land.
     `focus` (bool mask, e.g. the Pin Point neighbourhood from focus_region) intersects
     the result so interventions sit around the focal community (up/downstream).
-    Without `classes`/`wetlands`/`buildings`, falls back to elevation-only heuristics.
+    Falls back to elevation-only heuristics when classes, wetlands, and buildings are all unset.
     """
     from scipy import ndimage
     land = np.isfinite(dem) & (dem > sea_level)
@@ -68,6 +68,9 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
             z = land & np.isin(classes, NLCD_DEVELOPED)
         else:
             z = land & (dem > sea_level + 0.5)
+    elif kind == "living_shoreline":                     # marsh-water edge
+        z = (wetlands & ndimage.binary_dilation(sea, iterations=1)) if wetlands is not None \
+            else (sea & ndimage.binary_dilation(land, iterations=1))
     elif kind == "permeable":
         z = (land & np.isin(classes, NLCD_DEVELOPED)) if classes is not None \
             else (land & (dem > sea_level + 0.5))
@@ -108,17 +111,22 @@ def patch_mask(shape, corr_len=30.0, area_frac=0.15, seed=0, restrict=None):
     return (f >= thr) & region
 
 
-# intervention registry: kind -> (knob ranges) used by sample_intervention
+# intervention registry: kind maps to knob ranges used by sample_intervention
 INTERVENTIONS = {
     "seawall":   {"crest_m": (2.0, 4.5), "buffer_cells": (1, 3)},
-    "marsh":     {"area_frac": (0.05, 0.30), "n_target": (0.10, 0.15),
+    "marsh":     {"area_frac": (0.05, 0.30), "n_target": (0.08, 0.16),  # Spartina spectrum:
                   "ksat_add": (10, 40), "awc_add": (50, 150), "corr_len": (15, 50)},
+    #            n_target spans young/sparse (0.08) to mature/dense (0.16) emergent marsh,
+    #            a vegetation-density/height proxy (class-based; height dataset refines later).
     "mangrove":  {"area_frac": (0.03, 0.15), "n_target": (0.15, 0.30),
                   "ksat_add": (5, 20), "awc_add": (30, 100), "corr_len": (10, 40)},
+    "living_shoreline": {"area_frac": (0.3, 0.7), "n_target": (0.10, 0.20),  # marsh-water edge
+                  "sill_m": (0.15, 0.40), "corr_len": (8, 25)},              # sill + roughness
+
     "permeable": {"area_frac": (0.05, 0.25), "ksat_rate": (20, 60), "corr_len": (10, 40)},
     "retreat":   {"area_frac": (0.02, 0.12), "natural_n": (0.035, 0.05), "corr_len": (10, 30)},
     "depave":    {"area_frac": (0.10, 0.50), "n_target": (0.06, 0.12),   # parking/impervious
-                  "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len": (8, 25)},  # -> vegetated
+                  "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len": (8, 25)},  # to vegetated
 }
 
 
@@ -135,12 +143,17 @@ def sample_intervention(kind, rng):
 
 def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
                        classes=None, focus=None, wetlands=None, soil_ksat=None,
-                       buildings=None):
+                       buildings=None, place="random", flood_depth=None, flood_zone=None,
+                       mhw=0.94, mlw=-1.17, slr_buffer=0.5):
     """Expand one config onto copies of the grids. `classes` = optional NLCD grid.
     SAGIS-conditioned siting (context_rasters.py): `wetlands` (NWI mask, so marsh sits
     on real marsh), `buildings` (FEMA footprints, so retreat acts on real structures),
     `soil_ksat` (SSURGO Ksat grid, mm/hr, so de-pave/permeable can't exceed what the soil
-    physically allows). `focus` = optional bool mask (Pin Point neighbourhood). Returns
+    physically allows). `focus` = optional bool mask (Pin Point neighbourhood).
+
+    `place`: "random" = Gaussian-field patches within the zone (training variety); "targeted"
+    = rank by siting.suitability_score using `flood_depth` (baseline .max), `flood_zone`, and
+    the tidal frame (`mhw`/`mlw`/`slr_buffer`), for realistic decision scenarios. Returns
     (dem, manning, ksat, awc, intensity); intensity marks the edited cells."""
     from scipy import ndimage
     dem, manning = dem.copy(), manning.copy()
@@ -163,38 +176,53 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
                                 near_water_cells=knobs.get("near_water_cells", 15),
                                 wetlands=wetlands, buildings=buildings)
 
-    def patch(k):
-        return patch_mask(dem.shape, knobs["corr_len"], knobs["area_frac"],
-                          knobs["seed"], restrict=zone(k))
+    def place_mask(k):
+        """Placement cells for kind k: random Gaussian patches within the zone, or the
+        top suitability-scored cells when place='targeted'."""
+        if place == "targeted":
+            from .siting import targeted_mask
+            return targeted_mask(dem, k, knobs.get("area_frac", 0.1), sea_level=sea_level,
+                                 wetlands=wetlands, buildings=buildings, flood_depth=flood_depth,
+                                 flood_zone=flood_zone, classes=classes, soil_ksat=soil_ksat,
+                                 focus=focus, mhw=mhw, mlw=mlw, slr_buffer=slr_buffer)
+        if k == "seawall":
+            s = ndimage.binary_dilation(sea, iterations=int(knobs.get("buffer_cells", 2))) & land
+            return (s & focus) if focus is not None else s
+        return patch_mask(dem.shape, knobs.get("corr_len", 30.0), knobs.get("area_frac", 0.1),
+                          knobs.get("seed", 0), restrict=zone(k))
 
     if kind == "seawall":
-        shore = ndimage.binary_dilation(sea, iterations=int(knobs["buffer_cells"])) & land
-        if focus is not None:
-            shore = shore & focus
-        dem[shore] = np.maximum(dem[shore], knobs["crest_m"])
-        intensity[shore] = 1.0
+        m = place_mask("seawall")
+        dem[m] = np.maximum(dem[m], knobs["crest_m"])
+        intensity[m] = 1.0
 
     elif kind in ("marsh", "mangrove"):
-        m = patch(kind)                                  # intertidal + adjacent to existing marsh
+        m = place_mask(kind)                             # intertidal + adjacent to existing marsh
         manning[m] = np.maximum(manning[m], knobs["n_target"])
         ksat[m] = ksat[m] + knobs["ksat_add"]; awc[m] = awc[m] + knobs["awc_add"]
         intensity[m] = 1.0
 
-    elif kind == "depave":                               # parking/impervious -> vegetated
-        m = patch("depave")
+    elif kind == "living_shoreline":                     # marsh-water edge sill + roughness
+        m = place_mask("living_shoreline")
+        manning[m] = np.maximum(manning[m], knobs["n_target"])
+        dem[m] = dem[m] + knobs.get("sill_m", 0.2)
+        intensity[m] = 1.0
+
+    elif kind == "depave":                               # parking/impervious to vegetated
+        m = place_mask("depave")
         cap = soil_capped(knobs["ksat_rate"])            # SSURGO-limited achievable rate
         manning[m] = np.maximum(manning[m], knobs["n_target"])
         ksat[m] = np.maximum(ksat[m], cap[m]); awc[m] = awc[m] + knobs["awc_add"]
         intensity[m] = 1.0
 
     elif kind == "permeable":
-        m = patch("permeable")
+        m = place_mask("permeable")
         cap = soil_capped(knobs["ksat_rate"])            # SSURGO-limited achievable rate
         ksat[m] = np.maximum(ksat[m], cap[m])
         intensity[m] = 1.0
 
     elif kind == "retreat":
-        m = patch("retreat")
+        m = place_mask("retreat")
         base = np.where(land & ~m, dem, np.nan)
         med = np.nanmedian(base) if np.isfinite(base).any() else np.nanmedian(dem[land])
         dem[m] = np.minimum(dem[m], med); manning[m] = knobs["natural_n"]

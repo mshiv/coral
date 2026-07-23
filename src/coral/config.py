@@ -111,10 +111,13 @@ class HPC:
 @dataclass
 class Interventions:
     """Defines the SLR x intervention ensemble for emulator.sweep (first-class + reproducible).
-    Knob RANGES stay in interventions.generate.INTERVENTIONS; this selects which kinds/levels
+    Knob ranges stay in interventions.generate.INTERVENTIONS; this selects which kinds/levels
     to sample and the SAGIS context data that conditions siting (Phase 2)."""
     kinds: list[str] = field(default_factory=lambda:
-        ["seawall", "marsh", "mangrove", "permeable", "retreat", "depave"])
+        ["seawall", "marsh", "living_shoreline", "permeable", "retreat", "depave"])
+    siting: str = "random"                    # random: training variety; targeted: realistic
+    flood_depth: Optional[str] = None         # baseline .max path, drives targeted siting
+    flood_zone: Optional[str] = None          # flood-zone polygon geojson, targets retreat/depave
     slr_levels: list[float] = field(default_factory=lambda: [0.0, 0.3, 0.6, 1.0, 1.5])
     n_per_kind: int = 4
     include_combos: bool = True

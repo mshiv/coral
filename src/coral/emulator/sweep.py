@@ -75,6 +75,7 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                 bdy_glob="*.bdy", sea_level=0.81,
                 focus_center=None, focus_radius_km=None, focus_mask=None, nlcd=None,
                 wetlands=None, soil_ksat=None, buildings=None,
+                place="random", flood_depth=None, flood_zone=None,
                 job_array=True, lisflood_bin="lisflood", account="gts-arobel3-atlas",
                 partition="cpu-medium", throttle=20):
     """Materialize each spec as a LISFLOOD-ready run dir + a training manifest.
@@ -118,7 +119,8 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                                                         sea_level=sea_level,
                                                         classes=classes, focus=focus,
                                                         wetlands=wetlands, soil_ksat=soil_ksat,
-                                                        buildings=buildings)
+                                                        buildings=buildings, place=place,
+                                                        flood_depth=flood_depth, flood_zone=flood_zone)
         write_ascii(str(run / dem_p.name), dem, str(dem_p))
         write_ascii(str(run / man_p.name), man, str(dem_p))
         if ksat_p:
@@ -192,11 +194,18 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
         sk = soil_ksat_grid(iv.soils_geojson, iv.ssurgo_table, str(dem_p))
     if iv.buildings:
         bld = buildings_mask(iv.buildings, str(dem_p))
+    fdep = fz = None
+    if iv.siting == "targeted":                          # resolve the targeting drivers
+        if iv.flood_depth:
+            a = np.loadtxt(iv.flood_depth, skiprows=6); fdep = np.where(a <= -9990, 0.0, a)
+        if iv.flood_zone:
+            fz = buildings_mask(iv.flood_zone, str(dem_p))
     specs = plan_sweep(iv.slr_levels, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed)
     return build_sweep(base_dir, specs, out_root, root=root, sea_level=cfg.geoclaw.sea_level,
                        focus_center=cfg.domain.ref_point,
                        focus_radius_km=iv.focus_radius_km or cfg.domain.focus_radius_km,
                        nlcd=nlcd, wetlands=wet, soil_ksat=sk, buildings=bld,
+                       place=iv.siting, flood_depth=fdep, flood_zone=fz,
                        lisflood_bin=cfg.hpc.lisflood_bin, account=cfg.hpc.account,
                        partition=cfg.hpc.partition)
 
