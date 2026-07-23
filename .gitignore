@@ -236,8 +236,10 @@ marimo/_lsp/
 __marimo__/
 
 # ── CORAL workflow: large data, HPC run dirs, model outputs ──
-runs/                 # generated GeoClaw/LISFLOOD run dirs + outputs (HPC scratch)
-!runs/README.md
+# generated GeoClaw/LISFLOOD run dirs + outputs (HPC scratch); keep the README markers
+runs/**
+!runs/**/
+!runs/**/README.md
 !data/README.md       # keep the fetch-instructions readme even though data/ is ignored
 *.zarr/
 *.tif
