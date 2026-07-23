@@ -1,0 +1,25 @@
+# Phase-1 emulator training ensemble (30 m, reuses the Matthew surge, ~10 min/run).
+# Intervention-space sampling, Pin Point-clustered, physically plausible: many random-placement
+# realizations per intervention across the plausible knob ranges (marsh n spans the Spartina
+# vegetation spectrum). This samples the intervention space for training breadth; targeted
+# runs are a separate small set for decision realism. See docs/adaptation_sampling_plan.md.
+#   python -m coral.emulator.sweep --base <30m_compound_run> --out runs/train30m \
+#       --config configs/scenarios/pinpoint_train30m.yaml --nlcd data/raw/nlcd_savannah.tif
+name: pinpoint_train30m
+domain:
+  dem:   data/raw/coned_pinpoint_2m.asc            # informational; sweep uses the base run's DEM
+  bbox:  [-81.22, -80.82, 31.82, 32.08]
+  ref_point: [-81.137, 31.944]
+interventions:
+  kinds: [marsh, living_shoreline, seawall, depave, retreat]
+  slr_levels: [0.0, 0.5, 1.0]
+  n_per_kind: 10                 # 10 random realizations/intervention/SLR -> 3*(1+5*10)=153 runs
+  include_combos: false
+  focus_radius_km: 3.0           # all interventions clustered at Pin Point
+  seed: 0
+  siting: random                 # random placement = training breadth (targeted = separate set)
+  # SAGIS context for the placement zones (marsh->NWI, de-pave->impervious, retreat->buildings)
+  wetlands:      data/raw/sagis_savannah/sagis_wetlands_nwi.geojson
+  soils_geojson: data/raw/sagis_savannah/sagis_soils_nrcs.geojson
+  ssurgo_table:  data/raw/ssurgo_savannah/ksat_awc_by_mukey.json
+  buildings:     data/raw/sagis_pinpoint/fema_structures_pinpoint.geojson

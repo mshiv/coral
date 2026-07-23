@@ -75,7 +75,10 @@ def assemble(base_run, out_root, *, name, nlcd=None, wetlands=None,
 
 
 # ---------------------------------------------------------------- HWM compare
-def _fetch_hwms(bbox):
+def _fetch_hwms(bbox, max_quality=None):
+    """USGS HWMs in bbox. max_quality keeps only marks with hwm_quality_id <= it
+    (1=excellent <=0.05 ft, 2=good <=0.10 ft, 3=fair, 4=poor, 5=very poor). Marks with
+    no quality id are dropped when max_quality is set."""
     url = f"https://stn.wim.usgs.gov/STNServices/Events/{USGS_EVENT}/HWMs.json"
     with urllib.request.urlopen(url, timeout=60) as r:
         d = json.loads(r.read().decode())
@@ -83,7 +86,10 @@ def _fetch_hwms(bbox):
     out = []
     for h in d:
         lon, lat, ev = h.get("longitude_dd"), h.get("latitude_dd"), h.get("elev_ft")
+        q = h.get("hwm_quality_id")
         if lon and lat and ev and w < lon < e and s < lat < n:
+            if max_quality is not None and (q is None or q > max_quality):
+                continue
             out.append((lon, lat, ev * FT2M))
     return out
 
@@ -111,11 +117,12 @@ def _stats(mxe, h, hwms):
             "rmse_m": round(float(np.sqrt((err ** 2).mean())), 3)}
 
 
-def compare_hwm(mxe_baseline, mxe_nwi, dem, *, out_fig=None):
-    """Sample both .mxe at USGS Matthew HWMs; report bias + RMSE and the winner."""
+def compare_hwm(mxe_baseline, mxe_nwi, dem, *, out_fig=None, max_quality=None):
+    """Sample both .mxe at USGS Matthew HWMs; report bias + RMSE and the winner.
+    max_quality restricts to higher-quality marks (see _fetch_hwms)."""
     _, hd = _read_grid(dem)
     bbox = _extent(hd)
-    hwms = _fetch_hwms(bbox)
+    hwms = _fetch_hwms(bbox, max_quality=max_quality)
     a, ha = _read_grid(mxe_baseline)
     v, hv = _read_grid(mxe_nwi)
     sb, sv = _stats(a, ha, hwms), _stats(v, hv, hwms)
@@ -158,6 +165,8 @@ if __name__ == "__main__":
     c.add_argument("mxe_baseline"); c.add_argument("mxe_nwi")
     c.add_argument("--dem", required=True)
     c.add_argument("--out-fig", default="reports/physics/physics_ab_hwm.png")
+    c.add_argument("--max-quality", type=int, default=None,
+                   help="keep only HWMs with hwm_quality_id <= this (1=excellent, 2=good)")
     a = ap.parse_args()
     if a.cmd == "compare":
-        compare_hwm(a.mxe_baseline, a.mxe_nwi, a.dem, out_fig=a.out_fig)
+        compare_hwm(a.mxe_baseline, a.mxe_nwi, a.dem, out_fig=a.out_fig, max_quality=a.max_quality)
