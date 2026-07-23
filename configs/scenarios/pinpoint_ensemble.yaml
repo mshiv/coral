@@ -1,0 +1,23 @@
+# SLR x intervention ensemble for the emulator training set (Phase 3/4).
+# Reuses the Matthew compound surge (GeoClaw runs once); each sample is one LISFLOOD run
+# with SLR-shifted .bdy + SAGIS-conditioned intervention edits. Build with:
+#   python -m coral.emulator.sweep --base <matthew_run_dir> --out runs/pinpoint_ensemble \
+#       --config configs/scenarios/pinpoint_ensemble.yaml --nlcd /path/to/nlcd_savannah.tif
+name: pinpoint_ensemble
+domain:
+  dem:   data/raw/coned_pinpoint_2m.asc          # (30 m Matthew base for the coarse ensemble)
+  bbox:  [-81.1557, -81.1181, 31.9278, 31.9601]
+  res_m: 2
+  ref_point: [-81.137, 31.944]
+interventions:
+  kinds: [seawall, marsh, mangrove, permeable, retreat, depave]
+  slr_levels: [0.0, 0.3, 0.6, 1.0, 1.5]
+  n_per_kind: 4
+  include_combos: true
+  focus_radius_km: 3.0
+  seed: 0
+  # SAGIS context for conditioned siting (Phase 2). Point at the domain-wide clips.
+  wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
+  soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
+  ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
+  buildings:     data/raw/sagis_pinpoint/fema_structures_pinpoint.geojson
