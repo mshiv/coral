@@ -75,7 +75,7 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                 bdy_glob="*.bdy", sea_level=0.81,
                 focus_center=None, focus_radius_km=None, focus_mask=None, nlcd=None,
                 wetlands=None, soil_ksat=None, buildings=None,
-                place="random", flood_depth=None, flood_zone=None,
+                place="random", flood_depth=None, flood_zone=None, res_m=30.0,
                 job_array=True, lisflood_bin="lisflood", account="gts-arobel3-atlas",
                 partition="cpu-medium", throttle=20):
     """Materialize each spec as a LISFLOOD-ready run dir + a training manifest.
@@ -120,7 +120,8 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                                                         classes=classes, focus=focus,
                                                         wetlands=wetlands, soil_ksat=soil_ksat,
                                                         buildings=buildings, place=place,
-                                                        flood_depth=flood_depth, flood_zone=flood_zone)
+                                                        flood_depth=flood_depth, flood_zone=flood_zone,
+                                                        res_m=res_m)
         write_ascii(str(run / dem_p.name), dem, str(dem_p))
         write_ascii(str(run / man_p.name), man, str(dem_p))
         if ksat_p:
@@ -206,6 +207,7 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
                        focus_radius_km=iv.focus_radius_km or cfg.domain.focus_radius_km,
                        nlcd=nlcd, wetlands=wet, soil_ksat=sk, buildings=bld,
                        place=iv.siting, flood_depth=fdep, flood_zone=fz,
+                       res_m=cfg.domain.res_m,
                        lisflood_bin=cfg.hpc.lisflood_bin, account=cfg.hpc.account,
                        partition=cfg.hpc.partition)
 

@@ -29,9 +29,12 @@ def _norm(a):
 
 def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=None,
                       flood_depth=None, flood_zone=None, classes=None, soil_ksat=None,
-                      focus=None, mhw=0.94, mlw=-1.17, slr_buffer=0.5):
+                      focus=None, mhw=0.94, mlw=-1.17, slr_buffer=0.5, res_m=30.0):
     """Per-cell suitability in [0,1] for `kind`; 0 outside its zone. Higher = better target."""
     from scipy import ndimage
+    def _win(metres, minimum=3):        # metres to an odd cell window for the filters below
+        c = max(minimum, int(round(metres / res_m)))
+        return c + 1 - c % 2
     land = np.isfinite(dem) & (dem > sea_level)
     sea = np.isfinite(dem) & (dem <= sea_level)
     s = np.zeros(dem.shape, "float64")
@@ -57,14 +60,14 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
         if wetlands is None:
             return s
         edge = wetlands & ndimage.binary_dilation(sea, iterations=1)
-        exposure = ndimage.uniform_filter(sea.astype(float), size=5)  # open-water frontage
+        exposure = ndimage.uniform_filter(sea.astype(float), size=_win(150.0))  # open-water frontage
         s = np.where(edge, _norm(exposure) + 0.1, 0.0)
 
     elif kind == "depave":
         zone = (land & np.isin(classes, NLCD_IMP)) if classes is not None else (land & (dem > sea_level + 0.5))
         drive = np.zeros(dem.shape)
         if flood_depth is not None:
-            drive = _norm(flood_depth) + _norm(ndimage.maximum_filter(flood_depth, size=9))  # floods or borders flooding
+            drive = _norm(flood_depth) + _norm(ndimage.maximum_filter(flood_depth, size=_win(270.0)))  # floods or borders flooding
         if soil_ksat is not None:
             drive = drive * (0.5 + 0.5 * _norm(np.where(np.isfinite(soil_ksat), soil_ksat, 0)))
         s = np.where(zone, _norm(drive) + 0.05, 0.0)
@@ -79,8 +82,8 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
             s = np.where(zone, _norm(-dem), 0.0)
 
     elif kind == "seawall":
-        shore = ndimage.binary_dilation(sea, iterations=2) & land
-        landward_flood = ndimage.maximum_filter(flood_depth, size=15) if flood_depth is not None else np.zeros(dem.shape)
+        shore = ndimage.binary_dilation(sea, iterations=max(1,int(round(60.0/res_m)))) & land
+        landward_flood = ndimage.maximum_filter(flood_depth, size=_win(450.0)) if flood_depth is not None else np.zeros(dem.shape)
         lowcrest = _norm(-(dem))                                  # low points overtop first
         s = np.where(shore, 0.6 * _norm(landward_flood) + 0.4 * lowcrest, 0.0)
 

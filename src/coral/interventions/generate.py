@@ -32,7 +32,8 @@ NLCD_IMPERVIOUS = (22, 23, 24)          # parking lots / roads / dense developme
 
 
 def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=None,
-                     elev_band=2.0, near_water_cells=15, wetlands=None, buildings=None):
+                     elev_band=2.0, near_water_m=450.0, wetlands=None, buildings=None,
+                     res_m=30.0):
     """Physically- and contextually-suitable zone for an intervention.
 
     - marsh/mangrove: real marsh footprint. If a `wetlands` mask (from NWI, via
@@ -48,6 +49,7 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
     Falls back to elevation-only heuristics when classes, wetlands, and buildings are all unset.
     """
     from scipy import ndimage
+    near_water_cells = max(1, int(round(near_water_m / res_m)))   # metres to cells
     land = np.isfinite(dem) & (dem > sea_level)
     sea = np.isfinite(dem) & (dem <= sea_level)
     if kind in ("marsh", "mangrove"):
@@ -55,10 +57,10 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
             z = np.isfinite(dem) & wetlands
         else:
             z = (land & (dem <= sea_level + elev_band)
-                 & ndimage.binary_dilation(sea, iterations=int(near_water_cells)))
+                 & ndimage.binary_dilation(sea, iterations=near_water_cells))
             if classes is not None:                      # extend existing marsh
                 wet = np.isin(classes, NLCD_WETLAND)
-                z = z & ndimage.binary_dilation(wet, iterations=int(near_water_cells))
+                z = z & ndimage.binary_dilation(wet, iterations=near_water_cells)
     elif kind == "retreat":
         if buildings is not None:                        # real footprints (FEMA)
             z = land & buildings
@@ -113,20 +115,23 @@ def patch_mask(shape, corr_len=30.0, area_frac=0.15, seed=0, restrict=None):
 
 # intervention registry: kind maps to knob ranges used by sample_intervention
 INTERVENTIONS = {
-    "seawall":   {"crest_m": (2.0, 4.5), "buffer_cells": (1, 3)},
+    # Spatial knobs are in METRES and are divided by the grid cell size at apply time, so the
+    # same registry gives the same physical intervention at 30 m and at 4 m. Values below
+    # reproduce the original cell-based ranges at 30 m.
+    "seawall":   {"crest_m": (2.0, 4.5), "buffer_m": (30, 90)},
     "marsh":     {"area_frac": (0.05, 0.30), "n_target": (0.08, 0.16),  # Spartina spectrum:
-                  "ksat_add": (10, 40), "awc_add": (50, 150), "corr_len": (15, 50)},
+                  "ksat_add": (10, 40), "awc_add": (50, 150), "corr_len_m": (450, 1500)},
     #            n_target spans young/sparse (0.08) to mature/dense (0.16) emergent marsh,
     #            a vegetation-density/height proxy (class-based; height dataset refines later).
     "mangrove":  {"area_frac": (0.03, 0.15), "n_target": (0.15, 0.30),
-                  "ksat_add": (5, 20), "awc_add": (30, 100), "corr_len": (10, 40)},
+                  "ksat_add": (5, 20), "awc_add": (30, 100), "corr_len_m": (300, 1200)},
     "living_shoreline": {"area_frac": (0.3, 0.7), "n_target": (0.10, 0.20),  # marsh-water edge
-                  "sill_m": (0.15, 0.40), "corr_len": (8, 25)},              # sill + roughness
+                  "sill_m": (0.15, 0.40), "corr_len_m": (240, 750)},              # sill + roughness
 
-    "permeable": {"area_frac": (0.05, 0.25), "ksat_rate": (20, 60), "corr_len": (10, 40)},
-    "retreat":   {"area_frac": (0.02, 0.12), "natural_n": (0.035, 0.05), "corr_len": (10, 30)},
+    "permeable": {"area_frac": (0.05, 0.25), "ksat_rate": (20, 60), "corr_len_m": (300, 1200)},
+    "retreat":   {"area_frac": (0.02, 0.12), "natural_n": (0.035, 0.05), "corr_len_m": (300, 900)},
     "depave":    {"area_frac": (0.10, 0.50), "n_target": (0.06, 0.12),   # parking/impervious
-                  "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len": (8, 25)},  # to vegetated
+                  "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len_m": (240, 750)},  # to vegetated
 }
 
 
@@ -144,7 +149,7 @@ def sample_intervention(kind, rng):
 def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
                        classes=None, focus=None, wetlands=None, soil_ksat=None,
                        buildings=None, place="random", flood_depth=None, flood_zone=None,
-                       mhw=0.94, mlw=-1.17, slr_buffer=0.5):
+                       mhw=0.94, mlw=-1.17, slr_buffer=0.5, res_m=30.0):
     """Expand one config onto copies of the grids. `classes` = optional NLCD grid.
     SAGIS-conditioned siting (context_rasters.py): `wetlands` (NWI mask, so marsh sits
     on real marsh), `buildings` (FEMA footprints, so retreat acts on real structures),
@@ -170,26 +175,32 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
         cap = np.where(np.isfinite(soil_ksat), soil_ksat, rate)
         return np.minimum(rate, cap)
 
+    def m_to_cells(metres, minimum=1):
+        return max(minimum, int(round(metres / res_m)))
+
     def zone(k):
         return suitability_mask(dem, sea_level, kind=k, classes=classes, focus=focus,
                                 elev_band=knobs.get("elev_band", 2.0),
-                                near_water_cells=knobs.get("near_water_cells", 15),
-                                wetlands=wetlands, buildings=buildings)
+                                near_water_m=knobs.get("near_water_m", 450.0),
+                                wetlands=wetlands, buildings=buildings, res_m=res_m)
 
     def place_mask(k):
         """Placement cells for kind k: random Gaussian patches within the zone, or the
-        top suitability-scored cells when place='targeted'."""
+        top suitability-scored cells when place='targeted'. Spatial knobs arrive in metres
+        and are converted to cells here, so the same knobs give the same physical footprint
+        at any grid resolution."""
         if place == "targeted":
             from .siting import targeted_mask
             return targeted_mask(dem, k, knobs.get("area_frac", 0.1), sea_level=sea_level,
                                  wetlands=wetlands, buildings=buildings, flood_depth=flood_depth,
                                  flood_zone=flood_zone, classes=classes, soil_ksat=soil_ksat,
-                                 focus=focus, mhw=mhw, mlw=mlw, slr_buffer=slr_buffer)
+                                 focus=focus, mhw=mhw, mlw=mlw, slr_buffer=slr_buffer,
+                                 res_m=res_m)
         if k == "seawall":
-            s = ndimage.binary_dilation(sea, iterations=int(knobs.get("buffer_cells", 2))) & land
+            s = ndimage.binary_dilation(sea, iterations=m_to_cells(knobs.get("buffer_m", 60.0))) & land
             return (s & focus) if focus is not None else s
-        return patch_mask(dem.shape, knobs.get("corr_len", 30.0), knobs.get("area_frac", 0.1),
-                          knobs.get("seed", 0), restrict=zone(k))
+        return patch_mask(dem.shape, m_to_cells(knobs.get("corr_len_m", 900.0)),
+                          knobs.get("area_frac", 0.1), knobs.get("seed", 0), restrict=zone(k))
 
     if kind == "seawall":
         m = place_mask("seawall")
