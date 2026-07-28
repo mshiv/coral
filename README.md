@@ -80,6 +80,10 @@ https://github.gatech.edu/smurugan9/build-docs
 
 Older SSLS/ERA5 surge/flood and coursework notebooks have been moved to `archive/` for reference.
 
+## Roadmap
+
+Add active patches (infiltration and available capacity modules) into docs or software submodules.
+
 ## Contact
 
 Shiva Muruganandham - smurugan9@gatech.edu
