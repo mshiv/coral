@@ -34,7 +34,7 @@ CUR_INFILCAP = "/Users/smurugan9/research/coastalFlood/savannah_matthew_workflow
 
 # Pin Point focus bbox (native domain is wider Savannah bbox; NWI/SSURGO fetches
 # were clipped here, so we crop all maps to this window for a fair, focused figure)
-PP_BBOX = (-81.1557, -81.1181, 31.9278, 31.9601)  # W, E, S, N
+PP_BBOX = (-81.1103, -81.0727, 31.9367, 31.9690)  # W, E, S, N
 
 # Full-domain (whole DEM extent) inputs, fetched separately over the entire
 # Savannah compound-flood domain (see data/raw/sagis_savannah, ssurgo_savannah).

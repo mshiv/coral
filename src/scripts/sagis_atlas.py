@@ -28,7 +28,7 @@ OUT = os.path.join(ROOT, "reports/sagis/atlas")
 os.makedirs(OUT, exist_ok=True)
 
 METRIC_CRS = "EPSG:32617"
-PP_BBOX = (-81.1557, -81.1181, 31.9278, 31.9601)  # minx, maxx, miny, maxy
+PP_BBOX = (-81.1103, -81.0727, 31.9367, 31.9690)  # minx, maxx, miny, maxy
 
 captions = []  # (filename, caption) collected as we go
 
