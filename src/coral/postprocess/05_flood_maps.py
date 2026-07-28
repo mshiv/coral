@@ -31,7 +31,7 @@ def read_grid(path):
     return a, ext
 
 
-PIN = (-81.137, 31.944)
+PIN = (-81.0903, 31.9522)
 SAV_BOX = (-81.111, -80.819, 31.804, 32.100)
 
 
@@ -48,7 +48,7 @@ def main():
 
     base = os.path.join(args.dir, args.root)
     dem, ext = read_grid(args.dem)
-    land = dem > args.sea_level                     # land mask
+    land = dem > args.sea_level
 
     def land_only(a, floor=None):
         a = np.where(land, a, np.nan)

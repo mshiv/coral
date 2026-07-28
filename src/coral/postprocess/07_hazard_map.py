@@ -22,7 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
-PIN = (-81.137, 31.944)
+PIN = (-81.0903, 31.9522)
 
 
 def read_grid(path):

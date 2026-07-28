@@ -37,7 +37,7 @@ class Domain:
     dem: str
     bbox: list[float]                 # [W, E, S, N]
     res_m: float = 30.0
-    ref_point: list[float] = field(default_factory=lambda: [-81.137, 31.944])
+    ref_point: list[float] = field(default_factory=lambda: [-81.0903, 31.9522])
     focus_radius_km: Optional[float] = None  # if set, interventions are restricted to
     #                                          within this radius of ref_point (Pin Point)
 

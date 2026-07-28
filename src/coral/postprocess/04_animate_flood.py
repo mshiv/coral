@@ -25,7 +25,7 @@ try:
 except ImportError:
     HAVE_CTX = False
 
-PIN = (-81.137, 31.944)   # Pin Point, Savannah
+PIN = (-81.0903, 31.9522)   # Pin Point, Savannah
 SAV_BOX = (-81.111, -80.819, 31.804, 32.100)   # Pin Point / coupling box
 
 

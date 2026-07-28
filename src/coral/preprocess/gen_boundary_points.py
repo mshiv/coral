@@ -70,8 +70,8 @@ def main():
     if args.spacing_m is None:     args.spacing_m = 400.0
     if args.seaward_cells is None: args.seaward_cells = 3
     if args.name is None:          args.name = "savannah_coastline"
-    if args.lon is None:           args.lon = -81.137
-    if args.lat is None:           args.lat = 31.944
+    if args.lon is None:           args.lon = -81.0903
+    if args.lat is None:           args.lat = 31.9522
 
     with rasterio.open(args.dem) as s:
         z = s.read(1).astype(float)
