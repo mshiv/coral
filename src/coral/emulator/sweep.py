@@ -44,20 +44,32 @@ def apply_slr_to_bdy(bdy_in, bdy_out, slr_m):
 
 def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0):
     """Build the sweep spec: baseline + single interventions x SLR (+ optional
-    pairwise combos). Returns a list of {name, slr_m, interventions:[knobs,...]}."""
+    pairwise combos). Returns a list of {name, slr_m, slr_label, interventions:[knobs,...]}.
+
+    `slr_levels` is either a list of floats (name f"slr{slr}", slr_label=None) or a
+    list of (label, float) tuples (name f"slr{label}", e.g. slrInt2050), for SLR levels
+    resolved from NOAA scenarios via preprocess.fetch_slr.slr_levels. Mixed lists are
+    fine; each entry is normalized independently.
+    """
     rng = np.random.default_rng(seed)
     specs = []
-    for slr in slr_levels:
-        specs.append({"name": f"slr{slr}_base", "slr_m": slr, "interventions": []})
+    for entry in slr_levels:
+        if isinstance(entry, (tuple, list)):
+            label, slr = entry
+        else:
+            label, slr = None, entry
+        tag = label if label is not None else slr
+        specs.append({"name": f"slr{tag}_base", "slr_m": slr, "slr_label": label,
+                      "interventions": []})
         for kind in kinds:
             for j in range(n_per_kind):
                 kb = sample_intervention(kind, rng)
-                specs.append({"name": f"slr{slr}_{kind}{j}", "slr_m": slr,
+                specs.append({"name": f"slr{tag}_{kind}{j}", "slr_m": slr, "slr_label": label,
                               "interventions": [kb]})
         if include_combos:                       # a few multi-intervention configs
             for j in range(n_per_kind):
                 combo = [sample_intervention(k, rng) for k in rng.choice(kinds, 2, replace=False)]
-                specs.append({"name": f"slr{slr}_combo{j}", "slr_m": slr,
+                specs.append({"name": f"slr{tag}_combo{j}", "slr_m": slr, "slr_label": label,
                               "interventions": combo})
     return specs
 
@@ -133,6 +145,8 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
             if p.is_file():
                 shutil.copy2(p, run / p.name)
         forcing = {"slr_m": spec["slr_m"]}
+        if spec.get("slr_label"):
+            forcing["slr_label"] = spec["slr_label"]
         for kb in spec["interventions"]:                    # flatten knobs as features
             forcing.update({f"{kb['kind']}_{k}": v for k, v in kb.items()
                             if k not in ("kind", "seed")})
@@ -140,7 +154,18 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                          "forcing": forcing, "interventions": spec["interventions"]})
 
     json.dump(manifest, open(out_root / "manifest.json", "w"), indent=2)
-    par_name = next((p.name for p in passthrough if p.suffix == ".par"), "savannah.par")
+    # pick the .par deterministically: prefer an ASCII-output one. A base dir often holds
+    # several (savannah.par, test.par) that enable netcdf_out, which segfaults on
+    # finalisation in this build, and Path.glob order is not guaranteed.
+    pars = sorted(p for p in passthrough if p.suffix == ".par")
+    ascii_pars = [p for p in pars
+                  if not any(l.strip().startswith("netcdf_out") for l in p.read_text().splitlines())]
+    if not pars:
+        raise SystemExit(f"no .par file found in {base}")
+    if not ascii_pars:
+        raise SystemExit(f"every .par in {base} sets netcdf_out, which segfaults; "
+                         "stage an ASCII-output .par")
+    par_name = ascii_pars[0].name
     if job_array:
         _emit_job_array(out_root, manifest, lisflood_bin, par_name,
                         account, partition, throttle)
@@ -158,7 +183,10 @@ def _emit_job_array(out_root, manifest, lisflood_bin, par_name, account, partiti
     """One SLURM array over all run dirs: task i cd's into run_dirs.txt line i and runs
     LISFLOOD. Concurrency throttled with %throttle. Replaces N separate sbatch calls."""
     out_root = Path(out_root)
-    (out_root / "run_dirs.txt").write_text("\n".join(m["run_dir"] for m in manifest) + "\n")
+    # absolute paths: the array job cd's into these, and SLURM's working directory is the
+    # submit directory, which is not necessarily where the sweep was generated from
+    (out_root / "run_dirs.txt").write_text(
+        "\n".join(str(Path(m["run_dir"]).resolve()) for m in manifest) + "\n")
     n = len(manifest)
     sbatch = f"""#!/usr/bin/env bash
 #SBATCH -J coral_sweep
@@ -201,7 +229,12 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
             a = np.loadtxt(iv.flood_depth, skiprows=6); fdep = np.where(a <= -9990, 0.0, a)
         if iv.flood_zone:
             fz = buildings_mask(iv.flood_zone, str(dem_p))
-    specs = plan_sweep(iv.slr_levels, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed)
+    slr_levels_all = list(iv.slr_levels)
+    if iv.slr_scenarios:                          # additive: resolve scenarios onto slr_levels
+        from ..preprocess.fetch_slr import slr_levels as resolve_slr_scenarios
+        targets = [(scen, year) for scen, year in iv.slr_scenarios]
+        slr_levels_all += resolve_slr_scenarios(targets, station=cfg.forcing.tide_station)
+    specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed)
     return build_sweep(base_dir, specs, out_root, root=root, sea_level=cfg.geoclaw.sea_level,
                        focus_center=cfg.domain.ref_point,
                        focus_radius_km=iv.focus_radius_km or cfg.domain.focus_radius_km,

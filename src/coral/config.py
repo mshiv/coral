@@ -119,6 +119,8 @@ class Interventions:
     flood_depth: Optional[str] = None         # baseline .max path, drives targeted siting
     flood_zone: Optional[str] = None          # flood-zone polygon geojson, targets retreat/depave
     slr_levels: list[float] = field(default_factory=lambda: [0.0, 0.3, 0.6, 1.0, 1.5])
+    slr_scenarios: Optional[list] = None      # e.g. [["Int",2050],["IntHigh",2050]]; resolved
+    #                                            to metres via fetch_slr, additive to slr_levels
     n_per_kind: int = 4
     include_combos: bool = True
     focus_radius_km: Optional[float] = None   # restrict siting to this radius of ref_point
