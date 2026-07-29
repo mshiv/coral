@@ -9,13 +9,23 @@ name: pinpoint_train30m
 domain:
   dem:   data/raw/coned_pinpoint_2m.asc            # informational; sweep uses the base run's DEM
   bbox:  [-81.22, -80.82, 31.82, 32.08]
-  ref_point: [-81.137, 31.944]
+  ref_point: [-81.0903, 31.9522]
 interventions:
   kinds: [marsh, living_shoreline, seawall, depave, retreat]
-  slr_levels: [0.0, 0.5, 1.0]
-  n_per_kind: 10                 # 10 random realizations/intervention/SLR -> 3*(1+5*10)=153 runs
+  slr_levels: [0.0]                    # present day
+  slr_scenarios: [["Int", 2050], ["Int", 2070], ["Int", 2100], ["IntHigh", 2100], ["High", 2100]]
+  #  2022 Interagency SLR Task Force report, Fort Pulaski, baseline-corrected to the 2016
+  #  Matthew surge boundary (see preprocess/fetch_slr.py): Int2050 0.3005, Int2070 0.5395,
+  #  Int2100 1.0975, IntHigh2100 1.5445, High2100 2.0425 m. With the 0.0 baseline this spans
+  #  0 to ~2 m in roughly even steps, which is what the emulator needs to learn the SLR
+  #  response; intermediate values are obtained by evaluating the trained emulator, which
+  #  is free.
+  n_per_kind: 10             # 6 SLR levels x (1 baseline + 5 kinds x 10) = 306 runs
   include_combos: false
-  focus_radius_km: 3.0           # all interventions clustered at Pin Point
+  focus_radius_km: 10.0       # wide context: training wants diversity across several marsh
+  #  communities, not just Pin Point, so the emulator sees varied placement contexts. The
+  #  targeted decision runs (pinpoint_valid30m.yaml and the 4 m decision ensemble) stay at
+  #  3 km, tight around Pin Point, because those runs are asking a site-specific question.
   seed: 0
   siting: random                 # random placement = training breadth (targeted = separate set)
   # SAGIS context for the placement zones (marsh->NWI, de-pave->impervious, retreat->buildings)
