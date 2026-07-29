@@ -7,7 +7,7 @@ domain:
   dem:   data/raw/ga_cudem_30m.asc
   bbox:  [-81.22, -80.82, 31.82, 32.08]
   res_m: 30
-  ref_point: [-81.137, 31.944]
+  ref_point: [-81.0903, 31.9522]
 geoclaw:
   refine_box: [-81.111, -80.819, 31.804, 32.100]
 coupling:

@@ -6,9 +6,9 @@
 name: pinpoint_ensemble
 domain:
   dem:   data/raw/coned_pinpoint_2m.asc          # (30 m Matthew base for the coarse ensemble)
-  bbox:  [-81.1557, -81.1181, 31.9278, 31.9601]
+  bbox:  [-81.1103, -81.0727, 31.9367, 31.9690]
   res_m: 2
-  ref_point: [-81.137, 31.944]
+  ref_point: [-81.0903, 31.9522]
 interventions:
   kinds: [seawall, marsh, mangrove, permeable, retreat, depave]
   slr_levels: [0.0, 0.3, 0.6, 1.0, 1.5]
