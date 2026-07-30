@@ -18,7 +18,10 @@ from .models import UNet
 def load_model(ckpt, device=None):
     import torch
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    st = torch.load(ckpt, map_location=device)
+    # weights_only=False because the checkpoint also carries the numpy normalization stats,
+    # which torch 2.6's default weights_only=True refuses to unpickle. These are our own
+    # checkpoints written by coral.emulator.train, not third-party files.
+    st = torch.load(ckpt, map_location=device, weights_only=False)
     model = UNet(in_channels=st["in_channels"], base=st["base"]).to(device)
     model.load_state_dict(st["model"]); model.eval()
     return model, st["stats"], device

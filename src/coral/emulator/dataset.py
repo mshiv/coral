@@ -79,16 +79,33 @@ def sample_to_arrays(s: FloodSample):
 
 class FloodDataset:
     """torch Dataset over FloodSamples. Channel-wise standardization from `stats`
-    (fit on the train split, reused on val/test)."""
+    (fit on the train split, reused on val/test).
 
-    def __init__(self, samples, stats=None):
+    `lazy` controls whether the decoded arrays are held in RAM. Eager caching costs
+    9 channels x H x W x 4 bytes per sample, which is 43 MB on the 1356x882 30 m grid
+    and so 64 GB over a 1506-member ensemble. Anything past a few dozen members must
+    run lazy, which re-reads the ASCII grids on each access instead; use DataLoader
+    workers to hide that I/O. `stats_n` caps how many samples the normalization stats
+    are fitted on, since the channel means are stable long before 1506 samples.
+    """
+
+    def __init__(self, samples, stats=None, lazy=True, stats_n=64, seed=0):
         import torch  # noqa: F401  (fail early if extra not installed)
         self.samples = list(samples)
-        self.cache = [sample_to_arrays(s) for s in self.samples]
-        self.stats = stats or self._fit_stats()
+        if not self.samples:
+            raise ValueError("FloodDataset got zero samples")
+        self.lazy = lazy
+        self.cache = None if lazy else [sample_to_arrays(s) for s in self.samples]
+        self.stats = stats or self._fit_stats(stats_n, seed)
 
-    def _fit_stats(self):
-        xs = np.stack([x for x, _, _ in self.cache])          # [N,C,H,W]
+    def _fit_stats(self, stats_n, seed):
+        if self.cache is not None:
+            xs = np.stack([x for x, _, _ in self.cache])       # [N,C,H,W]
+        else:
+            rng = np.random.default_rng(seed)
+            n = min(stats_n, len(self.samples))
+            pick = rng.choice(len(self.samples), size=n, replace=False)
+            xs = np.stack([sample_to_arrays(self.samples[i])[0] for i in pick])
         m = xs.mean(axis=(0, 2, 3)); sd = xs.std(axis=(0, 2, 3)) + 1e-6
         return {"mean": m.astype("float32"), "std": sd.astype("float32")}
 
@@ -97,7 +114,8 @@ class FloodDataset:
 
     def __getitem__(self, i):
         import torch
-        X, y, mask = self.cache[i]
+        X, y, mask = self.cache[i] if self.cache is not None \
+            else sample_to_arrays(self.samples[i])
         m, sd = self.stats["mean"][:, None, None], self.stats["std"][:, None, None]
         Xn = (X - m) / sd
         return (torch.from_numpy(Xn),
@@ -115,30 +133,74 @@ def partition(samples, is_test):
     return tr, te
 
 
-def make_datasets(train_samples, test_samples=None):
+def make_datasets(train_samples, test_samples=None, lazy=True):
     """Build (train_ds, test_ds); test reuses the TRAIN normalization stats so the
     held-out set isn't peeked at when standardizing."""
-    tr = FloodDataset(train_samples)
-    te = FloodDataset(test_samples, stats=tr.stats) if test_samples else None
+    tr = FloodDataset(train_samples, lazy=lazy)
+    te = FloodDataset(test_samples, stats=tr.stats, lazy=lazy) if test_samples else None
     return tr, te
 
 
-def build_manifest(runs):
+def build_manifest(runs, skip_missing=False):
     """Turn a list of dicts (run_dir, name, forcing, ...) into FloodSamples.
 
     Each dict: {name, run_dir, root='res_matthew_sav', forcing={...},
                 infil?, infilcap?}. Static maps are looked up inside run_dir.
+
+    `skip_missing` drops runs whose grids or `.max` are absent instead of raising, which
+    is what an ensemble needs: sweep writes one manifest entry per planned member, but
+    members that are still queued or that failed have no `.max` yet. Returns the samples;
+    call `missing_runs` for the list of what was dropped and why.
     """
     out = []
     for r in runs:
         d = Path(r["run_dir"]); root = r.get("root", "res_matthew_sav")
+        dem = next(iter(sorted(d.glob("SUB_DEM*.asc"))), None)
+        man = next(iter(sorted(d.glob("Manning*.asc"))), None)
+        mx = _find_max(d, root, r.get("results_dir"))
+        if dem is None or man is None or not mx.exists():
+            if skip_missing:
+                continue
+            what = "DEM" if dem is None else "Manning grid" if man is None else str(mx)
+            raise FileNotFoundError(f"{r['name']}: missing {what} in {d}")
         out.append(FloodSample(
             name=r["name"],
-            dem=str(next(d.glob("SUB_DEM*.asc"))),
-            manning=str(next(d.glob("Manning*.asc"))),
-            maxfile=str(d / f"results_matthew_sav/{root}.max"),
-            infil=str(next(iter(d.glob("infil_*.asc")), "")) or None,
-            infilcap=str(next(iter(d.glob("infilcap_*.asc")), "")) or None,
+            dem=str(dem),
+            manning=str(man),
+            maxfile=str(mx),
+            infil=str(next(iter(sorted(d.glob("infil_*.asc"))), "")) or None,
+            infilcap=str(next(iter(sorted(d.glob("infilcap_*.asc"))), "")) or None,
             forcing=r.get("forcing", {}),
         ))
     return out
+
+
+def _find_max(run_dir, root, results_dir=None):
+    """Locate the `.max` inside a run dir. The results directory name comes from the par's
+    `dirroot`, so it is `results_matthew_sav` for the 30 m ensemble but
+    `results_pinpoint_highres_4m` for the 4 m one; glob rather than assume."""
+    d = Path(run_dir)
+    if results_dir:
+        return d / results_dir / f"{root}.max"
+    exact = sorted(d.glob(f"results_*/{root}.max"))
+    if exact:
+        return exact[0]
+    any_max = sorted(d.glob("results_*/*.max"))
+    return any_max[0] if any_max else d / f"results_matthew_sav/{root}.max"
+
+
+def missing_runs(runs):
+    """The complement of build_manifest(skip_missing=True): (name, reason) per dropped run.
+    Use it to tell an incomplete ensemble apart from a broken path before training."""
+    bad = []
+    for r in runs:
+        d = Path(r["run_dir"]); root = r.get("root", "res_matthew_sav")
+        if not d.is_dir():
+            bad.append((r["name"], f"run dir absent: {d}")); continue
+        if not next(iter(d.glob("SUB_DEM*.asc")), None):
+            bad.append((r["name"], "no SUB_DEM*.asc")); continue
+        if not next(iter(d.glob("Manning*.asc")), None):
+            bad.append((r["name"], "no Manning*.asc")); continue
+        if not _find_max(d, root, r.get("results_dir")).exists():
+            bad.append((r["name"], "no .max, member not finished")); continue
+    return bad
