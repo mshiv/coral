@@ -103,36 +103,59 @@ def _sample(mxe, h, lon, lat):
     return np.nan
 
 
-def _stats(mxe, h, hwms):
-    obs, mod = [], []
+def _stats(mxe, h, hwms, dem=None, dem_h=None, max_dem_diff=None):
+    """Bias and RMSE of modelled max water surface against observed high-water marks.
+
+    `max_dem_diff` drops marks whose observed water-surface elevation is more than that many
+    metres from the DEM at the same location. Those are marks the model cannot be scored
+    against: either the survey point sits on a structure the DEM does not resolve, or the
+    coordinates land in the wrong cell at 30 m. Without this filter a handful of marks with
+    metre-scale DEM disagreement dominate the RMSE.
+    """
+    obs, mod, dropped = [], [], 0
     for lon, lat, o in hwms:
         m = _sample(mxe, h, lon, lat)
-        if np.isfinite(m):
-            obs.append(o); mod.append(m)
+        if not np.isfinite(m):
+            continue
+        if max_dem_diff is not None and dem is not None:
+            z = _sample(dem, dem_h, lon, lat)
+            if not np.isfinite(z) or abs(z - o) > max_dem_diff:
+                dropped += 1; continue
+        obs.append(o); mod.append(m)
     obs, mod = np.array(obs), np.array(mod)
     if len(obs) == 0:
         return None
     err = mod - obs
-    return {"n": len(obs), "bias_m": round(float(err.mean()), 3),
+    return {"n": len(obs), "n_dropped_dem": dropped,
+            "bias_m": round(float(err.mean()), 3),
             "rmse_m": round(float(np.sqrt((err ** 2).mean())), 3)}
 
 
-def compare_hwm(mxe_baseline, mxe_nwi, dem, *, out_fig=None, max_quality=None):
+def compare_hwm(mxe_baseline, mxe_nwi=None, dem=None, *, out_fig=None,
+                max_quality=None, max_dem_diff=None):
     """Sample both .mxe at USGS Matthew HWMs; report bias + RMSE and the winner.
     max_quality restricts to higher-quality marks (see _fetch_hwms)."""
-    _, hd = _read_grid(dem)
+    dg, hd = _read_grid(dem)
     bbox = _extent(hd)
     hwms = _fetch_hwms(bbox, max_quality=max_quality)
     a, ha = _read_grid(mxe_baseline)
-    v, hv = _read_grid(mxe_nwi)
-    sb, sv = _stats(a, ha, hwms), _stats(v, hv, hwms)
-    if not sb or not sv:
+    sb = _stats(a, ha, hwms, dem=dg, dem_h=hd, max_dem_diff=max_dem_diff)
+    if not sb:
         raise SystemExit(f"no HWMs sampled in domain ({len(hwms)} HWMs in bbox {bbox})")
-    print(f"HWMs in domain: {len(hwms)}")
-    print(f"  baseline (NLCD Manning): bias {sb['bias_m']:+.3f} m, RMSE {sb['rmse_m']:.3f} m (n={sb['n']})")
-    print(f"  nwi      (NWI Manning) : bias {sv['bias_m']:+.3f} m, RMSE {sv['rmse_m']:.3f} m (n={sv['n']})")
-    better = "NWI" if sv["rmse_m"] < sb["rmse_m"] else "baseline"
-    print(f"VERDICT: {better} fits HWMs better "
+    print(f"HWMs in bbox: {len(hwms)}"
+          + (f" (quality <= {max_quality})" if max_quality else "")
+          + (f", {sb['n_dropped_dem']} dropped for |DEM-obs| > {max_dem_diff} m"
+             if max_dem_diff else ""))
+    print(f"  run A: bias {sb['bias_m']:+.3f} m, RMSE {sb['rmse_m']:.3f} m (n={sb['n']})")
+    if mxe_nwi is None:                       # single-run validation, no A/B
+        return {"baseline": sb}
+    v, hv = _read_grid(mxe_nwi)
+    sv = _stats(v, hv, hwms, dem=dg, dem_h=hd, max_dem_diff=max_dem_diff)
+    if not sv:
+        raise SystemExit("no HWMs sampled for the second run")
+    print(f"  run B: bias {sv['bias_m']:+.3f} m, RMSE {sv['rmse_m']:.3f} m (n={sv['n']})")
+    better = "B" if sv["rmse_m"] < sb["rmse_m"] else "A"
+    print(f"VERDICT: run {better} fits HWMs better "
           f"(RMSE {min(sb['rmse_m'], sv['rmse_m']):.3f} vs {max(sb['rmse_m'], sv['rmse_m']):.3f} m)")
     res = {"baseline": sb, "nwi": sv, "better": better}
 
@@ -162,11 +185,17 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Physics A/B: NWI Manning vs baseline, HWM fit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("compare")
-    c.add_argument("mxe_baseline"); c.add_argument("mxe_nwi")
+    c.add_argument("mxe_baseline")
+    c.add_argument("mxe_nwi", nargs="?", default=None,
+                   help="optional second run; omit to validate a single run")
     c.add_argument("--dem", required=True)
     c.add_argument("--out-fig", default="reports/physics/physics_ab_hwm.png")
     c.add_argument("--max-quality", type=int, default=None,
                    help="keep only HWMs with hwm_quality_id <= this (1=excellent, 2=good)")
+    c.add_argument("--max-dem-diff", type=float, default=None,
+                   help="drop HWMs where |DEM - observed WSE| exceeds this many metres; the "
+                        "documented calibration used 1.0 with --max-quality 2, giving n=16")
     a = ap.parse_args()
     if a.cmd == "compare":
-        compare_hwm(a.mxe_baseline, a.mxe_nwi, a.dem, out_fig=a.out_fig, max_quality=a.max_quality)
+        compare_hwm(a.mxe_baseline, a.mxe_nwi, a.dem, out_fig=a.out_fig,
+                    max_quality=a.max_quality, max_dem_diff=a.max_dem_diff)
