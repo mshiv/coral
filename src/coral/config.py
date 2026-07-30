@@ -107,6 +107,17 @@ class HPC:
     account: str = "gts-arobel3-atlas"
     partition: str = "cpu-medium"
     lisflood_bin: str = "/path/to/LISFLOOD-FP-trunk/lisflood"
+    # The binary is dynamically linked against these, so a compute node with a clean module
+    # environment cannot load it without them.
+    modules: str = "gcc/12.3.0 netcdf-c/4.9.2-gszew36"
+    # Only the main flux loop in fp_acc.cpp is parallel and one section sits in `omp critical`,
+    # so threading saturates well before 24. Throughput comes from concurrent array members
+    # instead. Benchmark and set this at the knee.
+    cpus_per_task: int = 8
+    # A 1356x882 domain needs a few hundred MB of field arrays. This is per task, not per cpu:
+    # --mem-per-cpu=12G on 24 cpus asks for 288 GB and never schedules.
+    mem: str = "16G"
+    walltime: str = "04:00:00"
 
 @dataclass
 class Interventions:

@@ -249,6 +249,15 @@ if __name__ == "__main__":
         make_infil_ssurgo(a.ssurgo_soils_geojson, a.ssurgo_table, dem,
                            a.out or f"data/interim/infil_ssurgo_{c.name}.asc",
                            max_rate_mm_hr=a.max_rate)
+    elif c.forcing.infil_capped and not a.out and a.max_rate is None:
+        # The capped scheme needs both grids: the Ksat rate (infilfile) and the AWC storage
+        # capacity (infilcapfile). Going through from_config writes both, honouring
+        # forcing.infil_capped. Calling make_infil alone would write only the rate grid and
+        # leave infilcap_<name>.asc absent, which fails later with no obvious cause.
+        from_config(c, dem=dem)
     else:
         make_infil(c.domain.bbox, dem, a.out or f"data/interim/infil_{c.name}.asc",
                    max_rate_mm_hr=a.max_rate)
+        if c.forcing.infil_capped:
+            print(f"NOTE: {c.name} sets forcing.infil_capped, but --out/--max-rate forced the "
+                  "single-grid path. infilcap_<name>.asc was NOT written.")

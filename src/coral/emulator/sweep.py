@@ -16,6 +16,7 @@ Deps: numpy, scipy, rasterio (via interventions), stdlib.
 """
 from __future__ import annotations
 import json
+import os
 import shutil
 from pathlib import Path
 import numpy as np
@@ -89,7 +90,9 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                 wetlands=None, soil_ksat=None, buildings=None,
                 place="random", flood_depth=None, flood_zone=None, res_m=30.0,
                 job_array=True, lisflood_bin="lisflood", account="gts-arobel3-atlas",
-                partition="cpu-medium", throttle=20):
+                partition="cpu-medium", throttle=20,
+                modules="gcc/12.3.0 netcdf-c/4.9.2-gszew36", cpus_per_task=8,
+                mem="16G", walltime="04:00:00"):
     """Materialize each spec as a LISFLOOD-ready run dir + a training manifest.
 
     base_dir must hold the Matthew inputs: SUB_DEM*.asc, Manning*.asc, infil_*.asc,
@@ -122,6 +125,35 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                    if p.suffix in (".bci", ".par", ".txt", ".nc", ".sbatch", ".sh")
                    or p.suffix == ""]   # "" = the lisflood binary; .sbatch = job script
 
+    # Shared, deduplicated inputs. Copying every grid into every member costs about 120 MB
+    # per member, and most of it is redundant: the .bdy depends only on the SLR level, so a
+    # 306-member sweep over 6 levels writes 300 needless copies of a 69 MB file, and a grid
+    # an intervention does not touch is bit-identical to the base. Both are symlinked instead.
+    shared = out_root / "_shared"; shared.mkdir(exist_ok=True)
+
+    def shared_bdy(slr_m):
+        """One .bdy per distinct SLR offset, written once and reused."""
+        tag = f"{slr_m:+.4f}".replace(".", "p")
+        p = shared / f"{bdy_p.stem}_slr{tag}{bdy_p.suffix}"
+        if not p.exists():
+            apply_slr_to_bdy(bdy_p, p, slr_m)
+        return p
+
+    def link(target, dest):
+        """Absolute symlink, replacing anything already at dest."""
+        dest = Path(dest)
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+        dest.symlink_to(Path(target).resolve())
+
+    def stage_grid(arr, base_arr, base_path, dest):
+        """Write the edited grid, or symlink the base file when the intervention left it
+        untouched. Returns True if a new file was written."""
+        if np.array_equal(np.nan_to_num(arr, nan=-9999.0),
+                          np.nan_to_num(base_arr, nan=-9999.0)):
+            link(base_path, dest); return False
+        write_ascii(str(dest), arr, str(dem_p)); return True
+
     manifest = []
     for spec in specs:
         run = out_root / spec["name"]; run.mkdir(exist_ok=True)
@@ -134,16 +166,16 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                                                         buildings=buildings, place=place,
                                                         flood_depth=flood_depth, flood_zone=flood_zone,
                                                         res_m=res_m)
-        write_ascii(str(run / dem_p.name), dem, str(dem_p))
-        write_ascii(str(run / man_p.name), man, str(dem_p))
+        stage_grid(dem, dem0, dem_p, run / dem_p.name)
+        stage_grid(man, man0, man_p, run / man_p.name)
         if ksat_p:
-            write_ascii(str(run / ksat_p.name), ksat, str(dem_p))
+            stage_grid(ksat, ksat0, ksat_p, run / ksat_p.name)
         if cap_p:
-            write_ascii(str(run / cap_p.name), awc, str(dem_p))
-        apply_slr_to_bdy(bdy_p, run / bdy_p.name, spec["slr_m"])
+            stage_grid(awc, awc0, cap_p, run / cap_p.name)
+        link(shared_bdy(spec["slr_m"]), run / bdy_p.name)
         for p in passthrough:
-            if p.is_file():
-                shutil.copy2(p, run / p.name)
+            if p.is_file():                       # .bci, .par, rain: never edited, so link
+                link(p, run / p.name)
         forcing = {"slr_m": spec["slr_m"]}
         if spec.get("slr_label"):
             forcing["slr_label"] = spec["slr_label"]
@@ -168,7 +200,9 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
     par_name = ascii_pars[0].name
     if job_array:
         _emit_job_array(out_root, manifest, lisflood_bin, par_name,
-                        account, partition, throttle)
+                        account, partition, throttle,
+                        modules=modules, cpus_per_task=cpus_per_task,
+                        mem=mem, walltime=walltime)
         print(f"built {len(manifest)} runs -> {out_root}")
         print(f"  manifest.json (for emulator.dataset.build_manifest)")
         print(f"  run_array.sbatch + run_dirs.txt  ->  sbatch run_array.sbatch")
@@ -179,7 +213,9 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
     return manifest
 
 
-def _emit_job_array(out_root, manifest, lisflood_bin, par_name, account, partition, throttle):
+def _emit_job_array(out_root, manifest, lisflood_bin, par_name, account, partition, throttle,
+                    modules="gcc/12.3.0 netcdf-c/4.9.2-gszew36", cpus_per_task=8,
+                    mem="16G", walltime="04:00:00"):
     """One SLURM array over all run dirs: task i cd's into run_dirs.txt line i and runs
     LISFLOOD. Concurrency throttled with %throttle. Replaces N separate sbatch calls."""
     out_root = Path(out_root)
@@ -188,24 +224,76 @@ def _emit_job_array(out_root, manifest, lisflood_bin, par_name, account, partiti
     (out_root / "run_dirs.txt").write_text(
         "\n".join(str(Path(m["run_dir"]).resolve()) for m in manifest) + "\n")
     n = len(manifest)
+    # A bad binary path here fails every member identically, so refuse to emit rather than
+    # let 1506 tasks die with "command not found". The bare default "lisflood" is not on PATH
+    # on a compute node, and the config default is a literal placeholder.
+    if not str(lisflood_bin).startswith("/") or "/path/to/" in str(lisflood_bin):
+        raise SystemExit(
+            f"lisflood_bin is {lisflood_bin!r}, which will not resolve on a compute node. "
+            "Pass --config so hpc.lisflood_bin from configs/base.yaml is used, or set an "
+            "absolute path there.")
     sbatch = f"""#!/usr/bin/env bash
 #SBATCH -J coral_sweep
 #SBATCH -A {account}
 #SBATCH -p {partition}
 #SBATCH --array=1-{n}%{throttle}
 #SBATCH -N 1
-#SBATCH --cpus-per-task=24
-#SBATCH --mem-per-cpu=12G
-#SBATCH -t 08:00:00
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem={mem}
+#SBATCH -t {walltime}
 #SBATCH -o %x_%A_%a.out
+# The binary is dynamically linked against these; a compute node starts with a clean module
+# environment and the loader fails without them. Loaded before `set -e` because module init
+# is not always clean under `set -u`.
+module load {modules}
 set -euo pipefail
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+ulimit -s unlimited
 RUN=$(sed -n "${{SLURM_ARRAY_TASK_ID}}p" "{out_root.resolve()}/run_dirs.txt")
+[ -n "$RUN" ] && [ -d "$RUN" ] || {{ echo "no run dir for task $SLURM_ARRAY_TASK_ID"; exit 1; }}
 echo "task $SLURM_ARRAY_TASK_ID -> $RUN"
 cd "$RUN"
 {lisflood_bin} {par_name}
+# A nonzero exit is not conclusive in this build (it can segfault at finalisation after
+# writing output), and a zero exit does not prove the target field exists. Check the artefact.
+ls results_*/*.max >/dev/null 2>&1 || {{ echo "FAILED: no .max in $RUN"; exit 1; }}
+echo "ok: $(ls results_*/*.max)"
 """
     (out_root / "run_array.sbatch").write_text(sbatch)
+
+
+def _read_flood_depth(path, dem_path):
+    """Read a baseline `.max` for targeted siting, on the DEM's grid.
+
+    The path may contain shell variables (`${BASE}/...`) so a config can name the base run
+    without hard-coding an absolute cluster path. The grid must match the DEM cell for cell:
+    siting indexes the depth array with DEM-shaped masks, so a mismatch would silently
+    misplace every intervention rather than fail. That matters most for the 4 m ensemble,
+    whose baseline `.max` comes from the 4 m baseline run and not from the 30 m one.
+    """
+    p = Path(os.path.expandvars(str(path)))
+    if not p.exists():
+        raise SystemExit(f"interventions.flood_depth does not exist: {p}\n"
+                         "  (unexpanded ${BASE}? export it, or write the full path)")
+    dem_h = _asc_header(dem_path)
+    dep_h = _asc_header(p)
+    for k in ("ncols", "nrows"):
+        if dem_h[k] != dep_h[k]:
+            raise SystemExit(
+                f"flood_depth grid {p.name} is {dep_h['ncols']:g}x{dep_h['nrows']:g} but the "
+                f"DEM {Path(dem_path).name} is {dem_h['ncols']:g}x{dem_h['nrows']:g}. Targeted "
+                "siting needs the baseline .max from a run on this same grid.")
+    a = np.loadtxt(p, skiprows=6)
+    return np.where(a <= -9990, 0.0, a)
+
+
+def _asc_header(path):
+    h = {}
+    with open(path) as f:
+        for _ in range(6):
+            k, v = f.readline().split()
+            h[k.lower()] = float(v)
+    return h
 
 
 def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
@@ -225,10 +313,15 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
         bld = buildings_mask(iv.buildings, str(dem_p))
     fdep = fz = None
     if iv.siting == "targeted":                          # resolve the targeting drivers
-        if iv.flood_depth:
-            a = np.loadtxt(iv.flood_depth, skiprows=6); fdep = np.where(a <= -9990, 0.0, a)
+        if not iv.flood_depth:
+            raise SystemExit(
+                f"scenario {cfg.name!r} sets siting: targeted but no interventions.flood_depth. "
+                "Targeted siting ranks candidate cells by baseline peak depth, so it needs the "
+                "no-adaptation .max on this same grid, e.g.\n"
+                "  flood_depth: ${BASE}/results_matthew_sav/res_matthew_sav.max")
+        fdep = _read_flood_depth(iv.flood_depth, dem_p)
         if iv.flood_zone:
-            fz = buildings_mask(iv.flood_zone, str(dem_p))
+            fz = buildings_mask(os.path.expandvars(iv.flood_zone), str(dem_p))
     slr_levels_all = list(iv.slr_levels)
     if iv.slr_scenarios:                          # additive: resolve scenarios onto slr_levels
         from ..preprocess.fetch_slr import slr_levels as resolve_slr_scenarios
@@ -241,6 +334,8 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
                        nlcd=nlcd, wetlands=wet, soil_ksat=sk, buildings=bld,
                        place=iv.siting, flood_depth=fdep, flood_zone=fz,
                        res_m=cfg.domain.res_m,
+                       modules=cfg.hpc.modules, cpus_per_task=cfg.hpc.cpus_per_task,
+                       mem=cfg.hpc.mem, walltime=cfg.hpc.walltime,
                        lisflood_bin=cfg.hpc.lisflood_bin, account=cfg.hpc.account,
                        partition=cfg.hpc.partition)
 

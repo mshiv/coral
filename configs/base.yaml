@@ -27,3 +27,11 @@ hpc:
   account: gts-arobel3-atlas
   partition: cpu-medium
   lisflood_bin: /storage/home/hcoda1/6/smurugan9/data/software/LISFLOOD-FP-trunk/lisflood
+  # The binary is dynamically linked against these; compute nodes start with a clean module env.
+  modules: gcc/12.3.0 netcdf-c/4.9.2-gszew36
+  # Only the flux loop in fp_acc.cpp is threaded and part of it sits in `omp critical`, so this
+  # saturates well before 24. Benchmark on the smoke test and set it at the knee; throughput
+  # comes from running more members concurrently, not from more threads per member.
+  cpus_per_task: 8
+  mem: 16G                # per task, not per cpu. A 1356x882 domain needs a few hundred MB.
+  walltime: 04:00:00      # about 24x margin on a 10 min member, pending the smoke test

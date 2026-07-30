@@ -3,9 +3,13 @@
 # intervention with the targeted, flood-depth-ranked placement rule used for the real
 # decision runs. It tests whether the emulator, trained only on random placements,
 # generalizes to the realistic targeted placements it will actually be evaluated against.
-# `interventions.flood_depth` must point at a baseline .max path before use -- targeted
-# siting ranks candidate cells by flood depth there and there is no default.
-#   python -m coral.emulator.sweep --base <30m_compound_run> --out runs/valid30m \
+# Targeted siting ranks candidate cells by baseline peak flood depth, so
+# `interventions.flood_depth` points at the no-adaptation .max from $BASE itself. That run
+# is already done (it is the validated 30 m compound run), so nothing has to run first; the
+# path is expanded from the environment at sweep time and must be on the same grid as $BASE's
+# DEM, which it is by construction.
+#   export BASE=$SCR/runs/compound30m
+#   python -m coral.emulator.sweep --base $BASE --out runs/valid30m \
 #       --config configs/scenarios/pinpoint_valid30m.yaml --nlcd data/raw/nlcd_savannah.tif
 name: pinpoint_valid30m
 domain:
@@ -16,12 +20,12 @@ interventions:
   kinds: [marsh, living_shoreline, seawall, depave, retreat]
   slr_levels: [0.0]                    # present day
   slr_scenarios: [["Int", 2100]]
-  n_per_kind: 2                  # 1 SLR level x (1 baseline + 5 kinds x 2) = 11 runs
+  n_per_kind: 2                  # 2 SLR levels x (1 baseline + 5 kinds x 2) = 22 runs
   include_combos: false
   focus_radius_km: 3.0           # tight around Pin Point, matching the decision runs
   seed: 99                       # different seed from pinpoint_train30m.yaml (held out)
   siting: targeted                # realistic, flood-depth-ranked placement
-  flood_depth: null                # REQUIRED: set to a baseline .max path before use
+  flood_depth: ${BASE}/results_matthew_sav/res_matthew_sav.max   # baseline peak depth
   # SAGIS context for the placement zones (marsh->NWI, de-pave->impervious, retreat->buildings)
   wetlands:      data/raw/sagis_savannah/sagis_wetlands_nwi.geojson
   soils_geojson: data/raw/sagis_savannah/sagis_soils_nrcs.geojson
