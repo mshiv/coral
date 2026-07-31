@@ -33,6 +33,7 @@ CHUNK=${CHUNK:-}                  # members per chunk; default is derived from t
 START=${START:-1}                 # first member (1-based line in run_dirs.txt)
 END=${END:-}                      # last member; default is all of them
 POLL=${POLL:-120}                 # seconds between queue checks
+QOS=${QOS:-}                      # QOS to read limits from; default is the job's own
 DRYRUN=${DRYRUN:-0}
 
 while [ $# -gt 0 ]; do
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
     --chunk) CHUNK=$2; shift 2 ;;
     --throttle) THROTTLE=$2; shift 2 ;;
     --poll) POLL=$2; shift 2 ;;
+    --qos) QOS=$2; shift 2 ;;
     --dry-run) DRYRUN=1; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
@@ -64,7 +66,23 @@ log() { echo "[$(date '+%m-%d %H:%M:%S')] $*"; }
 MAXARR=$(scontrol show config 2>/dev/null | awk -F= '/MaxArraySize/{gsub(/ /,"",$2); print $2}')
 MAXARR=${MAXARR:-1001}
 MAXIDX=$((MAXARR - 1))
-QOS=$(sacctmgr -n show assoc where user="$USER" format=QOS%40 2>/dev/null | head -1 | tr -d ' ' | cut -d, -f1)
+# Read limits from the QOS the job will actually run under, not just the first one listed.
+# An association commonly lists several (on PACE, "embers,inferno"), and picking alphabetically
+# lands on the preemptible backfill tier with a far smaller submit limit, which silently
+# throttles the whole ensemble.
+if [ -z "$QOS" ]; then
+  QOS=$(grep -oE '^#SBATCH[[:space:]]+(--qos|-q)[=[:space:]]+[A-Za-z0-9_-]+' "$SCRIPT" \
+        | grep -oE '[A-Za-z0-9_-]+$' | tail -1)
+fi
+if [ -z "$QOS" ]; then                       # the association's DEFAULT QOS is what a job gets
+  QOS=$(sacctmgr -n show assoc where user="$USER" format=DefaultQOS%30 2>/dev/null \
+        | tr -d ' ' | grep -v '^$' | head -1)
+fi
+if [ -z "$QOS" ]; then
+  QOS=$(sacctmgr -n show assoc where user="$USER" format=QOS%60 2>/dev/null \
+        | tr -d ' ' | grep -v '^$' | head -1 | cut -d, -f1)
+  log "no default QOS found; falling back to $QOS. Pass --qos if the limits below look wrong."
+fi
 MAXSUB=$(sacctmgr -n show qos "$QOS" format=MaxSubmitJobsPU 2>/dev/null | tr -d ' ')
 [ -z "$MAXSUB" ] && MAXSUB=$(sacctmgr -n show qos "$QOS" format=MaxSubmitJobs 2>/dev/null | tr -d ' ')
 if ! [ "$MAXSUB" -eq "$MAXSUB" ] 2>/dev/null; then
@@ -107,6 +125,11 @@ log "MaxArraySize $MAXARR, largest legal index $MAXIDX"
 log "$log_cpu"
 log "chunk $CHUNK members, throttle %$THROTTLE running, poll ${POLL}s"
 log "$(( (TOTAL + CHUNK - 1) / CHUNK )) chunks to submit"
+if [ "$(( (TOTAL + CHUNK - 1) / CHUNK ))" -gt 10 ]; then
+  log "WARNING: that is a lot of chunks for $TOTAL members. If the QOS above is not the one"
+  log "         your jobs run under, rerun with --qos <name>. Check with:"
+  log "         sacctmgr -n show assoc where user=\$USER format=QOS%60,DefaultQOS%20"
+fi
 
 # count my queued jobs; -r expands array elements, which is how the limit counts them
 mine() { squeue -u "$USER" -h -r -t PD,R 2>/dev/null | wc -l | tr -d ' '; }
