@@ -90,9 +90,9 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                 wetlands=None, soil_ksat=None, buildings=None,
                 place="random", flood_depth=None, flood_zone=None, res_m=30.0,
                 job_array=True, lisflood_bin="lisflood", account="gts-arobel3-atlas",
-                partition="cpu-medium", throttle=20,
+                partition="cpu-medium", throttle=50,
                 modules="gcc/12.3.0 netcdf-c/4.9.2-gszew36", cpus_per_task=8,
-                mem="16G", walltime="04:00:00"):
+                mem="4G", walltime="01:30:00"):
     """Materialize each spec as a LISFLOOD-ready run dir + a training manifest.
 
     base_dir must hold the Matthew inputs: SUB_DEM*.asc, Manning*.asc, infil_*.asc,
@@ -215,7 +215,7 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
 
 def _emit_job_array(out_root, manifest, lisflood_bin, par_name, account, partition, throttle,
                     modules="gcc/12.3.0 netcdf-c/4.9.2-gszew36", cpus_per_task=8,
-                    mem="16G", walltime="04:00:00"):
+                    mem="4G", walltime="01:30:00"):
     """One SLURM array over all run dirs: task i cd's into run_dirs.txt line i and runs
     LISFLOOD. Concurrency throttled with %throttle. Replaces N separate sbatch calls."""
     out_root = Path(out_root)
@@ -336,6 +336,7 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
                        res_m=cfg.domain.res_m,
                        modules=cfg.hpc.modules, cpus_per_task=cfg.hpc.cpus_per_task,
                        mem=cfg.hpc.mem, walltime=cfg.hpc.walltime,
+                       throttle=cfg.hpc.throttle,
                        lisflood_bin=cfg.hpc.lisflood_bin, account=cfg.hpc.account,
                        partition=cfg.hpc.partition)
 

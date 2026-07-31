@@ -20,7 +20,12 @@ interventions:
   #  0 to ~2 m in roughly even steps, which is what the emulator needs to learn the SLR
   #  response; intermediate values are obtained by evaluating the trained emulator, which
   #  is free.
-  n_per_kind: 10             # 6 SLR levels x (1 baseline + 5 kinds x 10) = 306 runs
+  n_per_kind: 50             # 6 SLR levels x (1 baseline + 5 kinds x 50) = 1506 runs
+  #  A realization redraws both the placement (Gaussian random field seed) and the intensity
+  #  knobs (area_frac, n_target, ksat_rate, corr_len), so each is a distinct scenario rather
+  #  than the same patch moved. 50 is the starting point: train on it, plot skill against
+  #  training-set size, and only go to 100 (3006 runs, about 25 h and 272 GB) if the learning
+  #  curve is still climbing.
   include_combos: false
   focus_radius_km: 10.0       # wide context: training wants diversity across several marsh
   #  communities, not just Pin Point, so the emulator sees varied placement contexts. The

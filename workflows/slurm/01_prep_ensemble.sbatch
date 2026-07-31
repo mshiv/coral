@@ -66,7 +66,7 @@ case "$FIRST" in
   /*) ok "run_dirs.txt holds absolute paths" ;;
   *)  bad "run_dirs.txt is relative, the array will fail to cd" ;;
 esac
-PAR=$(tail -1 "$OUT/run_array.sbatch" | awk '{print $NF}')
+PAR=$(grep -E '^/.*lisflood[^/]*\s' "$OUT/run_array.sbatch" | tail -1 | awk '{print $NF}')
 [ "$PAR" = "savannah_ascii.par" ] && ok "array runs $PAR" || bad "array runs $PAR, expected savannah_ascii.par"
 
 # every input the par references must resolve inside the first member (symlink or real file)
@@ -83,11 +83,17 @@ python - "$BASE" "$OUT" <<'PY'
 import sys, glob, os
 base, out = sys.argv[1], sys.argv[2]
 def first(p):
+    """First data row's water level. Both fields must parse as numbers: the HVAR block header
+    ("50250  seconds") also has two fields and its first one is numeric, so checking only the
+    first field returns the row count for every file and makes every delta look like zero."""
     for l in open(p):
         s = l.split()
         if len(s) == 2:
-            try: return float(s[0])
-            except ValueError: pass
+            try:
+                v, t = float(s[0]), float(s[1])
+                return v
+            except ValueError:
+                pass
 b = first(glob.glob(os.path.join(base, "*.bdy"))[0])
 for p in sorted(glob.glob(os.path.join(out, "_shared", "*.bdy"))):
     print(f"      {os.path.basename(p):48s} delta {first(p)-b:+.4f} m")

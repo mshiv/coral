@@ -33,5 +33,10 @@ hpc:
   # saturates well before 24. Benchmark on the smoke test and set it at the knee; throughput
   # comes from running more members concurrently, not from more threads per member.
   cpus_per_task: 8
-  mem: 16G                # per task, not per cpu. A 1356x882 domain needs a few hundred MB.
-  walltime: 04:00:00      # about 24x margin on a 10 min member, pending the smoke test
+  mem: 4G                 # per task, not per cpu. Measured MaxRSS is 685 MB on the 30 m grid;
+                          # a smaller request backfills into idle slots far more readily.
+  walltime: 01:30:00      # measured member is 31 min, so this is about 3x margin. A shorter
+                          # request schedules sooner than a long one on a busy partition.
+  throttle: 50            # concurrent array members. The member count drives the ensemble's
+                          # value and the throttle drives its wall time, so raise this before
+                          # cutting realisations. Check the account limit before going higher.
