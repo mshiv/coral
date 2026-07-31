@@ -132,29 +132,21 @@ MAXARR=${MAXARR:-1001}
 # largest legal index is 1000, so --array=1002-1506 is rejected. Chunks therefore always use
 # low indices and set IDX_OFFSET to pick their block of run_dirs.txt.
 MAXIDX=$((MAXARR - 1))
-THROTTLE=$(grep -oE "^#SBATCH --array=[^%]+%([0-9]+)" "$OUT/run_array.sbatch" | grep -oE "[0-9]+$")
-THROTTLE=${THROTTLE:-50}
-echo; echo "=== SLURM array limits ==="
+QOS=$(sacctmgr -n show assoc where user="$USER" format=QOS%40 2>/dev/null | head -1 | tr -d ' ' | cut -d, -f1)
+MAXSUB=$(sacctmgr -n show qos "$QOS" format=MaxSubmitJobsPU 2>/dev/null | tr -d ' ')
+[ -z "$MAXSUB" ] && MAXSUB=500
+echo; echo "=== SLURM limits ==="
 echo "  MaxArraySize $MAXARR, so the largest legal task index is $MAXIDX"
-if [ "$N" -le "$MAXIDX" ]; then
-  ok "$N members fit in a single array"
-  LAUNCH="sbatch --array=1-$N%$THROTTLE run_array.sbatch"
+echo "  QOS $QOS MaxSubmitPU $MAXSUB, counting pending and running, array elements individually"
+if [ "$N" -le "$MAXIDX" ] && [ "$N" -lt "$MAXSUB" ]; then
+  ok "$N members fit in a single array within both limits"
+  LAUNCH="sbatch --array=1-$N run_array.sbatch"
 else
-  CHUNKS=$(( (N + MAXIDX - 1) / MAXIDX ))
-  log "$N members exceed the index limit, so submit $CHUNKS offset arrays:"
-  LAUNCH=""
-  off=0
-  while [ "$off" -lt "$N" ]; do
-    left=$(( N - off )); take=$MAXIDX; [ "$left" -lt "$take" ] && take=$left
-    if [ "$off" -eq 0 ]; then
-      LAUNCH="$LAUNCH
-  sbatch --array=1-$take%$THROTTLE run_array.sbatch"
-    else
-      LAUNCH="$LAUNCH
-  sbatch --export=ALL,IDX_OFFSET=$off --array=1-$take%$THROTTLE run_array.sbatch"
-    fi
-    off=$(( off + take ))
-  done
+  log "$N members exceed a limit, so submit through the chunk driver, which waits for the"
+  log "queue to drain between chunks rather than tripping MaxSubmitPU"
+  LAUNCH="  cd $OUT
+  nohup bash \$CORAL/workflows/slurm/submit_chunks.sh > submit_chunks.log 2>&1 &
+  tail -f submit_chunks.log"
 fi
 
 echo
