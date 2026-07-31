@@ -33,6 +33,7 @@ CHUNK=${CHUNK:-}                  # members per chunk; default is derived from t
 START=${START:-1}                 # first member (1-based line in run_dirs.txt)
 END=${END:-}                      # last member; default is all of them
 POLL=${POLL:-120}                 # seconds between queue checks
+MINCHUNK=${MINCHUNK:-25}          # do not bother submitting fewer than this at a time
 QOS=${QOS:-}                      # QOS to read limits from; default is the job's own
 DRYRUN=${DRYRUN:-0}
 
@@ -43,6 +44,7 @@ while [ $# -gt 0 ]; do
     --chunk) CHUNK=$2; shift 2 ;;
     --throttle) THROTTLE=$2; shift 2 ;;
     --poll) POLL=$2; shift 2 ;;
+    --min-chunk) MINCHUNK=$2; shift 2 ;;
     --qos) QOS=$2; shift 2 ;;
     --dry-run) DRYRUN=1; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
@@ -141,12 +143,21 @@ while [ "$pos" -le "$END" ]; do
   take=$CHUNK; [ "$left" -lt "$take" ] && take=$left
   offset=$(( pos - 1 ))
 
-  # wait for room. `take` new elements must fit under the ceiling alongside what is queued.
+  # Wait for room, then take as much of the chunk as fits. Demanding room for a whole chunk
+  # deadlocks whenever something else occupies part of the queue indefinitely: the ceiling is
+  # never fully free, so nothing is ever submitted. Shrinking to the available room instead
+  # keeps progress going, at the cost of more, smaller submissions.
   while :; do
     q=$(mine)
     room=$(( CEILING - q ))
-    [ "$room" -ge "$take" ] && break
-    log "queued $q, need room for $take, have $room. waiting ${POLL}s"
+    if [ "$room" -ge "$take" ]; then
+      break
+    elif [ "$room" -ge "$MINCHUNK" ]; then
+      log "queued $q, room for $room of $take. submitting $room now, the rest follows"
+      take=$room
+      break
+    fi
+    log "queued $q, room $room is below the $MINCHUNK minimum. waiting ${POLL}s"
     sleep "$POLL"
   done
 
