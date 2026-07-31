@@ -128,21 +128,32 @@ echo "  scratch free: $(df -h "$SCR" | awk 'NR==2{print $4}')"
 # ---------------------------------------------------------------- array size limit
 MAXARR=$(scontrol show config 2>/dev/null | awk -F= '/MaxArraySize/{gsub(/ /,"",$2); print $2}')
 MAXARR=${MAXARR:-1001}
+# MaxArraySize caps the maximum task INDEX, not the task count: with MaxArraySize=1001 the
+# largest legal index is 1000, so --array=1002-1506 is rejected. Chunks therefore always use
+# low indices and set IDX_OFFSET to pick their block of run_dirs.txt.
+MAXIDX=$((MAXARR - 1))
+THROTTLE=$(grep -oE "^#SBATCH --array=[^%]+%([0-9]+)" "$OUT/run_array.sbatch" | grep -oE "[0-9]+$")
+THROTTLE=${THROTTLE:-50}
 echo; echo "=== SLURM array limits ==="
-echo "  MaxArraySize on this cluster: $MAXARR"
-if [ "$N" -le "$MAXARR" ]; then
+echo "  MaxArraySize $MAXARR, so the largest legal task index is $MAXIDX"
+if [ "$N" -le "$MAXIDX" ]; then
   ok "$N members fit in a single array"
-  LAUNCH="sbatch run_array.sbatch"
+  LAUNCH="sbatch --array=1-$N%$THROTTLE run_array.sbatch"
 else
-  CHUNKS=$(( (N + MAXARR - 1) / MAXARR ))
-  bad "$N members exceed MaxArraySize $MAXARR: submit in $CHUNKS chunks"
-  LAUNCH="# $N > MaxArraySize, so submit in chunks:"
-  i=1
-  while [ "$i" -le "$N" ]; do
-    j=$(( i + MAXARR - 1 )); [ "$j" -gt "$N" ] && j=$N
-    LAUNCH="$LAUNCH
-  sbatch --array=$i-$j%20 run_array.sbatch"
-    i=$(( j + 1 ))
+  CHUNKS=$(( (N + MAXIDX - 1) / MAXIDX ))
+  log "$N members exceed the index limit, so submit $CHUNKS offset arrays:"
+  LAUNCH=""
+  off=0
+  while [ "$off" -lt "$N" ]; do
+    left=$(( N - off )); take=$MAXIDX; [ "$left" -lt "$take" ] && take=$left
+    if [ "$off" -eq 0 ]; then
+      LAUNCH="$LAUNCH
+  sbatch --array=1-$take%$THROTTLE run_array.sbatch"
+    else
+      LAUNCH="$LAUNCH
+  sbatch --export=ALL,IDX_OFFSET=$off --array=1-$take%$THROTTLE run_array.sbatch"
+    fi
+    off=$(( off + take ))
   done
 fi
 

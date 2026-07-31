@@ -232,11 +232,13 @@ def _emit_job_array(out_root, manifest, lisflood_bin, par_name, account, partiti
             f"lisflood_bin is {lisflood_bin!r}, which will not resolve on a compute node. "
             "Pass --config so hpc.lisflood_bin from configs/base.yaml is used, or set an "
             "absolute path there.")
+    # the default directive is only used when submitting with no explicit --array, so cap it
+    arr_n = min(n, 1000)
     sbatch = f"""#!/usr/bin/env bash
 #SBATCH -J coral_sweep
 #SBATCH -A {account}
 #SBATCH -p {partition}
-#SBATCH --array=1-{n}%{throttle}
+#SBATCH --array=1-{arr_n}%{throttle}
 #SBATCH -N 1
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --mem={mem}
@@ -249,9 +251,15 @@ module load {modules}
 set -euo pipefail
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 ulimit -s unlimited
-RUN=$(sed -n "${{SLURM_ARRAY_TASK_ID}}p" "{out_root.resolve()}/run_dirs.txt")
-[ -n "$RUN" ] && [ -d "$RUN" ] || {{ echo "no run dir for task $SLURM_ARRAY_TASK_ID"; exit 1; }}
-echo "task $SLURM_ARRAY_TASK_ID -> $RUN"
+# SLURM's MaxArraySize caps the maximum task INDEX, not the number of tasks: with
+# MaxArraySize=1001 the largest legal index is 1000, so `--array=1002-1506` is rejected
+# outright. Ensembles larger than that are submitted as several arrays that all use low
+# indices, with IDX_OFFSET selecting which block of run_dirs.txt each one reads.
+OFFSET=${{IDX_OFFSET:-0}}
+LINE=$((SLURM_ARRAY_TASK_ID + OFFSET))
+RUN=$(sed -n "${{LINE}}p" "{out_root.resolve()}/run_dirs.txt")
+[ -n "$RUN" ] && [ -d "$RUN" ] || {{ echo "no run dir for line $LINE (task $SLURM_ARRAY_TASK_ID + offset $OFFSET)"; exit 1; }}
+echo "task $SLURM_ARRAY_TASK_ID + offset $OFFSET -> line $LINE -> $RUN"
 cd "$RUN"
 {lisflood_bin} {par_name}
 # A nonzero exit is not conclusive in this build (it can segfault at finalisation after
