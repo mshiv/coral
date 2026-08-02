@@ -265,7 +265,16 @@ cd "$RUN"
 # A nonzero exit is not conclusive in this build (it can segfault at finalisation after
 # writing output), and a zero exit does not prove the target field exists. Check the artefact.
 ls results_*/*.max >/dev/null 2>&1 || {{ echo "FAILED: no .max in $RUN"; exit 1; }}
-echo "ok: $(ls results_*/*.max)"
+# Report the output size. A correct member writes about 55 MB of end-of-run fields. If this
+# reads in the GB, the par is writing per-timestep snapshots: absent `saveint` does NOT mean
+# off, LISFLOOD falls back to a 1000 s default, so the keyword must be present and larger
+# than the run length. Checking only that .max exists passes either way, which is how a
+# 5.7 TB overrun went unnoticed through a green smoke test.
+SZ=$(du -sm results_* 2>/dev/null | awk '{{s+=$1}} END{{print s+0}}')
+NSNAP=$(ls results_*/*-[0-9]*.wd 2>/dev/null | wc -l)
+echo "ok: $(ls results_*/*.max)  outputs ${{SZ}} MB, ${{NSNAP}} snapshots"
+[ "$NSNAP" -gt 0 ] && echo "WARNING: $NSNAP snapshots written; check saveint in the par"
+exit 0
 """
     (out_root / "run_array.sbatch").write_text(sbatch)
 

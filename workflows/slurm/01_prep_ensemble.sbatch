@@ -38,9 +38,17 @@ cd "$CORAL" || exit 1
 echo; echo "=== preconditions ==="
 [ -s "configs/scenarios/$SCENARIO.yaml" ] && ok "config found" || { bad "no configs/scenarios/$SCENARIO.yaml"; exit 1; }
 [ -s "$BASE/savannah_ascii.par" ] && ok "base par" || { bad "run 00_setup first"; exit 1; }
-grep -qE '^[[:space:]]*saveint' "$BASE/savannah_ascii.par" \
-  && bad "saveint still set in the base par: each member will write about 3.5 GB. Run 00_setup." \
-  || ok "no saveint, members write only .max/.mxe/.mass"
+# saveint must be PRESENT and beyond the run length. Absent means LISFLOOD uses its 1000 s
+# default and writes 173 snapshots per member, about 3.8 GB, which is the opposite of intended.
+SI=$(grep -E '^[[:space:]]*saveint' "$BASE/savannah_ascii.par" | awk '{print $2}' | tail -1)
+if [ -z "$SI" ]; then
+  bad "no saveint in the base par. Absent does NOT mean off: LISFLOOD defaults to 1000 s and"
+  bad "each member writes about 3.8 GB of snapshots. Run 00_setup to set saveint 999999."
+elif [ "$SI" -lt 172800 ]; then
+  bad "saveint $SI is inside the run length, so each member writes snapshots. Expected 999999."
+else
+  ok "saveint $SI, beyond the run length, so members write only end-of-run fields"
+fi
 [ -s data/raw/nlcd_savannah.tif ] && ok "NLCD present" || { bad "NLCD missing, run 00_setup"; exit 1; }
 log "scratch free before: $(df -h "$SCR" | awk 'NR==2{print $4}')"
 

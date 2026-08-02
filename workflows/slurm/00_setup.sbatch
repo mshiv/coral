@@ -88,8 +88,16 @@ sed -i -E '/^[[:space:]]*checkpoint\b/d' "$BASE/savannah_ascii.par"
 # and .mass. Duration and arrival therefore do not need the snapshots.
 # Keep full output for the small runs where evolution and hazard matter: the 4 m run, the
 # drainage tier pair, and a handful of baseline members (see the note printed at the end).
+# REMOVING saveint does not disable snapshots: LISFLOOD-FP falls back to a built-in default
+# of 1000 s, which over a 172800 s run writes 173 snapshots per member, more than the 97 that
+# `saveint 1800` would have written. The keyword must be PRESENT and larger than the
+# simulation length so no intermediate snapshot is ever due.
 sed -i -E '/^[[:space:]]*(saveint|qoutput)\b/d' "$BASE/savannah_ascii.par"
-grep -qE '^[[:space:]]*saveint' "$BASE/savannah_ascii.par" && bad "saveint still set" || ok "saveint and qoutput removed"
+printf 'saveint       999999\n' >> "$BASE/savannah_ascii.par"
+grep -qE '^[[:space:]]*saveint[[:space:]]+999999' "$BASE/savannah_ascii.par" \
+  && ok "saveint 999999 (beyond the run length, so no intermediate snapshots)" \
+  || bad "saveint not set correctly"
+grep -qE '^[[:space:]]*qoutput' "$BASE/savannah_ascii.par" && bad "qoutput still set" || ok "qoutput removed"
 log "NOTE: verify the smoke test still produces res_matthew_sav.max. If it does not, this"
 log "      build needs saveint present; set 'saveint 172800' instead of removing it."
 log "final par:"; sed 's/^/    /' "$BASE/savannah_ascii.par"
