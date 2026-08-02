@@ -203,10 +203,11 @@ def build_manifest(runs, skip_missing=False):
         dem = next(iter(sorted(d.glob("SUB_DEM*.asc"))), None)
         man = next(iter(sorted(d.glob("Manning*.asc"))), None)
         mx = _find_max(d, root, r.get("results_dir"))
-        if dem is None or man is None or not mx.exists():
+        if dem is None or man is None or not is_valid_max(mx):
             if skip_missing:
                 continue
-            what = "DEM" if dem is None else "Manning grid" if man is None else str(mx)
+            what = ("DEM" if dem is None else "Manning grid" if man is None
+                    else f"{mx} (absent, empty, or truncated)")
             raise FileNotFoundError(f"{r['name']}: missing {what} in {d}")
         out.append(FloodSample(
             name=r["name"],
@@ -218,6 +219,25 @@ def build_manifest(runs, skip_missing=False):
             forcing=r.get("forcing", {}),
         ))
     return out
+
+
+def is_valid_max(path):
+    """True if `path` looks like a real ESRI ASCII grid rather than a stub.
+
+    A member killed while writing, or one that hit a disk quota, leaves a zero-byte or
+    truncated .max behind. Checking only for existence counts those as finished, so the
+    ensemble reports complete and training then dies on the first unreadable header. The
+    cheap discriminator is the first header line: `ncols <n>`.
+    """
+    try:
+        p = Path(path)
+        if not p.is_file() or p.stat().st_size < 64:
+            return False
+        with open(p) as f:
+            parts = f.readline().split()
+        return len(parts) == 2 and parts[0].lower() == "ncols" and int(float(parts[1])) > 0
+    except (OSError, ValueError):
+        return False
 
 
 def _find_max(run_dir, root, results_dir=None):
@@ -246,6 +266,9 @@ def missing_runs(runs):
             bad.append((r["name"], "no SUB_DEM*.asc")); continue
         if not next(iter(d.glob("Manning*.asc")), None):
             bad.append((r["name"], "no Manning*.asc")); continue
-        if not _find_max(d, root, r.get("results_dir")).exists():
+        mx = _find_max(d, root, r.get("results_dir"))
+        if not mx.exists():
             bad.append((r["name"], "no .max, member not finished")); continue
+        if not is_valid_max(mx):
+            bad.append((r["name"], "empty or truncated .max, member must be rerun")); continue
     return bad

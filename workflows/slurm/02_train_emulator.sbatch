@@ -13,10 +13,10 @@
 #SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=8
 # GPU jobs need an explicit partition; without one the job lands on a CPU partition and
-# never gets a device. v100 chosen over the newer partitions because it had idle nodes while
-# the others were allocated or draining, and queue time dominates for a job this size. The
-# model trains at batch size 1 on a 1356x882 grid, so 16 GB is ample.
-#SBATCH -p gpu-v100
+# never gets a device. NOT gpu-v100: the V100 is compute capability 7.0 and this torch build
+# ships kernels for >=7.5 only, so torch.cuda.is_available() returns True and then the first
+# kernel launch fails. Usable here: rtx6000 (7.5), a100 (8.0), l40s (8.9), h100/h200 (9.0).
+#SBATCH -p gpu-a100
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --time=12:00:00

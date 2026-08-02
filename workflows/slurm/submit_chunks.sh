@@ -74,7 +74,10 @@ if [ "$RERUN" -eq 1 ]; then
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     NTOT=$(( NTOT + 1 ))
-    if ls "$d"/results_*/*.max >/dev/null 2>&1; then
+    # A zero-byte or truncated .max is NOT finished: a member killed mid-write, or one that
+    # hit a quota, leaves a stub that `ls` happily reports. Require a plausible header.
+    if [ -n "$(find "$d"/results_*/ -maxdepth 1 -name '*.max' -size +64c 2>/dev/null | head -1)" ] \
+       && head -1 $(find "$d"/results_*/ -maxdepth 1 -name '*.max' | head -1) 2>/dev/null | grep -qi '^ncols'; then
       NDONE=$(( NDONE + 1 ))
     else
       echo "$d" >> "$MISS" || { echo "FAIL: write to $MISS failed partway (quota?)."; exit 1; }
