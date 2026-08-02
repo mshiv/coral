@@ -12,6 +12,11 @@
 #SBATCH --job-name=coral-train
 #SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=8
+# GPU jobs need an explicit partition; without one the job lands on a CPU partition and
+# never gets a device. v100 chosen over the newer partitions because it had idle nodes while
+# the others were allocated or draining, and queue time dominates for a job this size. The
+# model trains at batch size 1 on a 1356x882 grid, so 16 GB is ample.
+#SBATCH -p gpu-v100
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --time=12:00:00
@@ -39,8 +44,24 @@ cd "$CORAL" || exit 1
 
 echo; echo "=== preconditions ==="
 [ -s "$TRAIN/manifest.json" ] && ok "training manifest" || { bad "run 01_prep_ensemble first"; exit 1; }
-python -c "import torch; print('  torch', torch.__version__, 'cuda', torch.cuda.is_available())" \
-  || { bad "torch missing: pip install -e '.[emulator]'"; exit 1; }
+# Hard stop rather than a warning: coral.emulator.train falls back to CPU when CUDA is
+# absent, so a GPU that failed to attach would not error, it would train at roughly a
+# hundredth of the speed and look healthy in the log. Checking on a login node proves nothing
+# because login nodes have no GPU; this runs on the allocated compute node.
+python - <<'PYCHK' || { bad "no usable GPU in this job. Check --gres=gpu:1 and the partition."; exit 1; }
+import sys
+try:
+    import torch
+except ImportError:
+    print("  torch not installed: pip install -e '.[emulator]'"); sys.exit(1)
+print(f"  torch {torch.__version__}, cuda available: {torch.cuda.is_available()}")
+if not torch.cuda.is_available():
+    print("  CUDA not available on this node. Training would silently fall back to CPU and")
+    print("  take weeks rather than hours, so this is a hard failure.")
+    sys.exit(1)
+print(f"  device: {torch.cuda.get_device_name(0)}, "
+      f"{torch.cuda.get_device_properties(0).total_memory/1e9:.0f} GB")
+PYCHK
 NDONE=$(ls "$TRAIN"/*/results_matthew_sav/res_matthew_sav.max 2>/dev/null | wc -l | tr -d ' ')
 NPLAN=$(wc -l < "$TRAIN/run_dirs.txt")
 log "$NDONE of $NPLAN members finished"

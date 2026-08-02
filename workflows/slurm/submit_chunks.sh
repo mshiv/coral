@@ -69,12 +69,27 @@ grep -q IDX_OFFSET "$SCRIPT" || {
 # pointing at that list rather than a filter applied to the original.
 if [ "$RERUN" -eq 1 ]; then
   MISS=run_dirs_missing.txt
-  : > "$MISS"
+  : > "$MISS" 2>/dev/null || { echo "FAIL: cannot write $MISS in $PWD (quota? permissions?)"; exit 1; }
+  NTOT=0; NDONE=0
   while IFS= read -r d; do
     [ -n "$d" ] || continue
-    ls "$d"/results_*/*.max >/dev/null 2>&1 || echo "$d" >> "$MISS"
+    NTOT=$(( NTOT + 1 ))
+    if ls "$d"/results_*/*.max >/dev/null 2>&1; then
+      NDONE=$(( NDONE + 1 ))
+    else
+      echo "$d" >> "$MISS" || { echo "FAIL: write to $MISS failed partway (quota?)."; exit 1; }
+    fi
   done < run_dirs.txt
   NM=$(wc -l < "$MISS")
+  # A partial write leaves a short list, which would silently submit only some of the missing
+  # members and look like success. present + missing must account for every planned member.
+  if [ "$(( NDONE + NM ))" -ne "$NTOT" ]; then
+    echo "FAIL: $NDONE finished + $NM missing = $(( NDONE + NM )), but run_dirs.txt has $NTOT."
+    echo "      The missing list is incomplete, most likely a truncated write. Free space and"
+    echo "      rerun; do not submit from this list."
+    exit 1
+  fi
+  echo "rerun mode: $NDONE of $NTOT members already have a .max"
   if [ "$NM" -eq 0 ]; then
     echo "every member already has a .max, nothing to rerun"; exit 0
   fi
@@ -84,7 +99,7 @@ if [ "$RERUN" -eq 1 ]; then
     echo "FAIL: could not point $SCRIPT_RERUN at $MISS; check the run_dirs path in $SCRIPT"
     exit 1; }
   SCRIPT=$SCRIPT_RERUN
-  echo "rerun mode: $NM of $(wc -l < run_dirs.txt) members lack a .max -> $MISS"
+  echo "rerun mode: $NM lack a .max -> $MISS"
 fi
 
 N=$(wc -l < "$( [ "$RERUN" -eq 1 ] && echo run_dirs_missing.txt || echo run_dirs.txt )")
