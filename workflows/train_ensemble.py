@@ -195,6 +195,11 @@ def main(argv=None):
                     help="evaluations without val improvement before stopping; 0 disables")
     ap.add_argument("--workers", type=int, default=4,
                     help="DataLoader workers; the dataset is lazy so this hides grid I/O")
+    ap.add_argument("--cache-dir", default=None,
+                    help="directory for decoded .npy grids. Parsing ASCII costs 0.28 s per "
+                         "grid and a sample reads five, so an epoch over 1506 members spends "
+                         "about 35 min in the parser. Cached reloads are 113x faster. Keyed on "
+                         "the resolved path, so symlinked base grids are stored once.")
     ap.add_argument("--eager", action="store_true",
                     help="cache decoded grids in RAM. About 43 MB per member on the 30 m "
                          "grid, so only for small ensembles")
@@ -203,6 +208,11 @@ def main(argv=None):
     ap.add_argument("--ckpt", default="emulator_unet.pt")
     ap.add_argument("--report", default=None, help="default: <ckpt>.report.json")
     a = ap.parse_args(argv)
+
+    if a.cache_dir:
+        from coral.emulator.dataset import set_grid_cache
+        d = set_grid_cache(a.cache_dir)
+        print(f"decoded-grid cache: {d} (first epoch builds it, later epochs reuse it)")
 
     print("=== loading manifests ===")
     runs = load_runs(a.ensemble)

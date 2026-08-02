@@ -24,7 +24,52 @@ Deps: numpy, torch (optional extra: pip install -e ".[emulator]").
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 import numpy as np
+
+
+# Optional on-disk cache of decoded grids. Parsing a 1356x882 ESRI ASCII grid costs about
+# 0.28 s, and a training sample reads five of them, so an epoch over 1506 members spends
+# roughly 35 minutes in np.loadtxt alone and a 300-epoch run would take a week. The same grid
+# reloads from .npy in 2.5 ms, 113x faster. The cache is keyed on the RESOLVED path, so the
+# ensemble's symlink deduplication carries over: every member that did not edit a given grid
+# shares one cache entry rather than storing its own copy.
+_CACHE_DIR = None
+
+
+def set_grid_cache(path):
+    """Enable the decoded-grid cache. Pass None to disable."""
+    global _CACHE_DIR
+    _CACHE_DIR = Path(path) if path else None
+    if _CACHE_DIR:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return _CACHE_DIR
+
+
+def _cache_key(path):
+    import hashlib
+    rp = os.path.realpath(path)
+    st = os.stat(rp)
+    # size and mtime guard against a stale entry if a grid is regenerated
+    sig = f"{rp}|{st.st_size}|{int(st.st_mtime)}"
+    return hashlib.sha1(sig.encode()).hexdigest()[:20]
+
+
+def read_asc_cached(path):
+    """read_asc, backed by the .npy cache when one is enabled."""
+    if _CACHE_DIR is None:
+        return read_asc(path)
+    f = _CACHE_DIR / f"{_cache_key(path)}.npy"
+    if f.exists():
+        try:
+            return np.load(f, mmap_mode="r"), None
+        except Exception:
+            f.unlink(missing_ok=True)      # corrupt or partial write, fall through and rebuild
+    a, h = read_asc(path)
+    tmp = f.with_suffix(f".tmp{os.getpid()}.npy")
+    np.save(tmp, a.astype("float32"))      # atomic rename so concurrent workers cannot race
+    os.replace(tmp, f)
+    return a, h
 
 
 def read_asc(path):
@@ -58,11 +103,11 @@ SCALAR_KEYS = ("surge_peak_m", "rain_total_mm", "slr_m", "infil_capped")
 
 def sample_to_arrays(s: FloodSample):
     """Return (X [C,H,W] float32, y [H,W] float32, mask [H,W] bool)."""
-    dem, _ = read_asc(s.dem)
-    man, _ = read_asc(s.manning)
-    ksat = read_asc(s.infil)[0] if s.infil else np.zeros_like(dem)
-    awc = read_asc(s.infilcap)[0] if s.infilcap else np.zeros_like(dem)
-    tgt, _ = read_asc(s.maxfile)
+    dem, _ = read_asc_cached(s.dem)
+    man, _ = read_asc_cached(s.manning)
+    ksat = read_asc_cached(s.infil)[0] if s.infil else np.zeros_like(dem)
+    awc = read_asc_cached(s.infilcap)[0] if s.infilcap else np.zeros_like(dem)
+    tgt, _ = read_asc_cached(s.maxfile)
 
     land = np.isfinite(dem) & (dem > s.sea_level)
     dist = np.where(dem <= s.sea_level, 0.0, 1.0)          # crude coast proxy

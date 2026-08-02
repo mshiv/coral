@@ -49,6 +49,13 @@ log "$NDONE of $NPLAN members finished"
 
 OUTDIR=$CORAL/reports/emulator
 mkdir -p "$OUTDIR"
+# Decoded-grid cache on scratch. Parsing the ASCII grids costs about 35 min per epoch over
+# 1506 members, which makes a 300-epoch run a week long. The first epoch fills this and the
+# rest reload from it. Keyed on the resolved path, so grids an intervention did not edit are
+# stored once across the whole ensemble rather than per member.
+CACHE=$SCR/interim/grid_cache
+mkdir -p "$CACHE"
+log "grid cache: $CACHE ($(du -sh "$CACHE" 2>/dev/null | cut -f1) so far)"
 
 echo; echo "=== training ==="
 case "$MODE" in
@@ -59,6 +66,7 @@ case "$MODE" in
       --ensemble "$TRAIN" \
       --holdout-slr IntHigh2100 High2100 \
       --epochs 300 --patience 10 --workers 8 \
+      --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_holdout.pt"
     ;;
   valid)
@@ -67,6 +75,7 @@ case "$MODE" in
     python workflows/train_ensemble.py \
       --ensemble "$TRAIN" --val-ensemble "$VALID" \
       --epochs 300 --patience 10 --workers 8 \
+      --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_targeted.pt"
     ;;
   curve)
@@ -77,6 +86,7 @@ case "$MODE" in
       --holdout-slr Int2070 \
       --subsample-per-kind 5 10 25 50 \
       --epochs 200 --patience 8 --workers 8 \
+      --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_curve.pt"
     ;;
   *) bad "unknown mode $MODE (use holdout, valid, or curve)"; exit 1 ;;
