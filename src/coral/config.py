@@ -117,7 +117,7 @@ class HPC:
     # A 1356x882 domain needs a few hundred MB of field arrays. This is per task, not per cpu:
     # --mem-per-cpu=12G on 24 cpus asks for 288 GB and never schedules.
     mem: str = "4G"
-    walltime: str = "01:30:00"
+    walltime: str = "04:00:00"
     throttle: int = 50        # concurrent array members; the main lever on ensemble wall time
 
 @dataclass

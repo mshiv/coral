@@ -35,8 +35,10 @@ hpc:
   cpus_per_task: 8
   mem: 4G                 # per task, not per cpu. Measured MaxRSS is 685 MB on the 30 m grid;
                           # a smaller request backfills into idle slots far more readily.
-  walltime: 01:30:00      # measured member is 31 min, so this is about 3x margin. A shorter
-                          # request schedules sooner than a long one on a busy partition.
+  walltime: 04:00:00      # A member runs in 31 min when a handful run at once, but at 325-way
+                          # concurrency 41% of members exceeded 90 min and were killed. Size
+                          # walltime from behaviour at full concurrency, not from a smoke test:
+                          # a few members contend for nothing, hundreds contend for scratch I/O.
   throttle: 50            # concurrent array members. The member count drives the ensemble's
                           # value and the throttle drives its wall time, so raise this before
                           # cutting realisations. Check the account limit before going higher.

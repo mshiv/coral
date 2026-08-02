@@ -36,6 +36,8 @@ POLL=${POLL:-120}                 # seconds between queue checks
 MINCHUNK=${MINCHUNK:-25}          # do not bother submitting fewer than this at a time
 QOS=${QOS:-}                      # QOS to read limits from; default is the job's own
 DRYRUN=${DRYRUN:-0}
+RERUN=${RERUN:-0}         # rebuild the member list from those still lacking a .max
+WALLTIME=${WALLTIME:-}    # override the launcher's -t, e.g. after a run of TIMEOUTs
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,7 +48,9 @@ while [ $# -gt 0 ]; do
     --poll) POLL=$2; shift 2 ;;
     --min-chunk) MINCHUNK=$2; shift 2 ;;
     --qos) QOS=$2; shift 2 ;;
+    --time) WALLTIME=$2; shift 2 ;;
     --dry-run) DRYRUN=1; shift ;;
+    --rerun-missing) RERUN=1; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
@@ -59,7 +63,31 @@ grep -q IDX_OFFSET "$SCRIPT" || {
   echo "      silently run the wrong members. Regenerate the ensemble, or patch the script."
   exit 1; }
 
-N=$(wc -l < run_dirs.txt)
+# Rerun mode: build a member list from the run dirs that have no .max, so a partially
+# completed ensemble can be finished without resubmitting what already succeeded. Members
+# are addressed by line number, so this needs its own list file and its own launcher
+# pointing at that list rather than a filter applied to the original.
+if [ "$RERUN" -eq 1 ]; then
+  MISS=run_dirs_missing.txt
+  : > "$MISS"
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    ls "$d"/results_*/*.max >/dev/null 2>&1 || echo "$d" >> "$MISS"
+  done < run_dirs.txt
+  NM=$(wc -l < "$MISS")
+  if [ "$NM" -eq 0 ]; then
+    echo "every member already has a .max, nothing to rerun"; exit 0
+  fi
+  SCRIPT_RERUN=run_array_missing.sbatch
+  sed "s|/run_dirs\.txt\"|/$MISS\"|" "$SCRIPT" > "$SCRIPT_RERUN"
+  grep -q "$MISS" "$SCRIPT_RERUN" || {
+    echo "FAIL: could not point $SCRIPT_RERUN at $MISS; check the run_dirs path in $SCRIPT"
+    exit 1; }
+  SCRIPT=$SCRIPT_RERUN
+  echo "rerun mode: $NM of $(wc -l < run_dirs.txt) members lack a .max -> $MISS"
+fi
+
+N=$(wc -l < "$( [ "$RERUN" -eq 1 ] && echo run_dirs_missing.txt || echo run_dirs.txt )")
 END=${END:-$N}
 
 log() { echo "[$(date '+%m-%d %H:%M:%S')] $*"; }
@@ -126,6 +154,7 @@ log "QOS $QOS: MaxSubmit $MAXSUB, working ceiling $CEILING (headroom $HEADROOM)"
 log "MaxArraySize $MAXARR, largest legal index $MAXIDX"
 log "$log_cpu"
 log "chunk $CHUNK members, throttle %$THROTTLE running, poll ${POLL}s"
+[ -n "$WALLTIME" ] && log "walltime overridden to $WALLTIME"
 log "$(( (TOTAL + CHUNK - 1) / CHUNK )) chunks to submit"
 if [ "$(( (TOTAL + CHUNK - 1) / CHUNK ))" -gt 10 ]; then
   log "WARNING: that is a lot of chunks for $TOTAL members. If the QOS above is not the one"
@@ -162,11 +191,10 @@ while [ "$pos" -le "$END" ]; do
   done
 
   chunk_no=$(( chunk_no + 1 ))
-  if [ "$offset" -eq 0 ]; then
-    CMD=(sbatch --array=1-"$take"%"$THROTTLE" "$SCRIPT")
-  else
-    CMD=(sbatch --export=ALL,IDX_OFFSET="$offset" --array=1-"$take"%"$THROTTLE" "$SCRIPT")
-  fi
+  CMD=(sbatch)
+  [ -n "$WALLTIME" ] && CMD+=(-t "$WALLTIME")
+  [ "$offset" -ne 0 ] && CMD+=(--export=ALL,IDX_OFFSET="$offset")
+  CMD+=(--array=1-"$take"%"$THROTTLE" "$SCRIPT")
   log "chunk $chunk_no: members $pos..$(( pos + take - 1 ))  ->  ${CMD[*]}"
   if [ "$DRYRUN" -eq 1 ]; then
     log "  (dry run, not submitted)"
