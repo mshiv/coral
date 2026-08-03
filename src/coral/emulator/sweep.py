@@ -182,7 +182,10 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         for kb in spec["interventions"]:                    # flatten knobs as features
             forcing.update({f"{kb['kind']}_{k}": v for k, v in kb.items()
                             if k not in ("kind", "seed")})
-        manifest.append({"name": spec["name"], "run_dir": str(run), "root": root,
+        # Absolute, matching run_dirs.txt. A relative run_dir only resolves from the repo
+        # root, so any tool run from the ensemble directory itself reports every member as
+        # absent, which looks like total data loss rather than a path bug.
+        manifest.append({"name": spec["name"], "run_dir": str(run.resolve()), "root": root,
                          "forcing": forcing, "interventions": spec["interventions"]})
 
     json.dump(manifest, open(out_root / "manifest.json", "w"), indent=2)
