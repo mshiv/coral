@@ -122,7 +122,16 @@ def run_ensemble(ensemble_dir, dem_asc, *, footprints=None, first_floor_m=0.0,
     is still going. A sea level with no finished baseline is skipped as a group, because
     without its baseline every delta at that level would be meaningless.
     """
+    # Validate inputs before doing any work. An unset environment variable leaves an empty
+    # path that expands to something like "/SUB_DEM_SAV.asc", and without this the failure
+    # surfaces deep inside the first pair comparison rather than at the argument that caused it.
+    for label, path in (("--dem", dem_asc), ("--footprints", footprints)):
+        if path and not Path(path).exists():
+            raise SystemExit(f"{label} does not exist: {path}\n"
+                             "  (an unset $BASE or $SCR expands to nothing; export them first)")
     ens = Path(ensemble_dir)
+    if not (ens / "manifest.json").exists():
+        raise SystemExit(f"no manifest.json in {ens}")
     entries = json.load(open(ens / "manifest.json"))
     by_level = {}
     for e in entries:
@@ -253,7 +262,16 @@ def fig_change_maps(ensemble_dir, dem_asc, out_png, *, level=None, wet_thresh=0.
     water somewhere else rather than removing it, which the summary counts cannot reveal."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    # Validate inputs before doing any work. An unset environment variable leaves an empty
+    # path that expands to something like "/SUB_DEM_SAV.asc", and without this the failure
+    # surfaces deep inside the first pair comparison rather than at the argument that caused it.
+    for label, path in (("--dem", dem_asc), ("--footprints", footprints)):
+        if path and not Path(path).exists():
+            raise SystemExit(f"{label} does not exist: {path}\n"
+                             "  (an unset $BASE or $SCR expands to nothing; export them first)")
     ens = Path(ensemble_dir)
+    if not (ens / "manifest.json").exists():
+        raise SystemExit(f"no manifest.json in {ens}")
     entries = json.load(open(ens / "manifest.json"))
     if level is not None:
         entries = [e for e in entries if _slr_key(e) == str(level)]
