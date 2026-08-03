@@ -212,6 +212,74 @@ def extend_bdy_to_zero(bdy_in, bdy_out=None):
     return bdy_out
 
 
+def clamp_bdy_to_bed(bci, bdy, dem_asc, margin=0.02, bdy_out=None):
+    """Raise every boundary stage to at least the FINE grid's bed at that point.
+
+    The series is sampled from the coarse run, whose channels reach about -10 m, while the
+    fine DEM is floored at -1 m to keep the timestep tractable. A coarse cell with its bed at
+    -3.5 m carrying 6 cm of water gives a legitimate water surface of -3.44 m, but on the fine
+    grid that is 2.4 m below the bed. LISFLOOD forms depth = WSE - bed, gets a negative depth,
+    and sqrt(g*h) returns NaN, which freezes the timestep and hangs the run.
+
+    Flooring the DEM and nesting a boundary from an unfloored parent are individually
+    reasonable and jointly inconsistent. This reconciles them at the boundary, which is where
+    the two grids meet.
+
+    Clamping only ever raises a stage, and only where the coarse channel is deeper than the
+    fine floor, so it cannot suppress the surge.
+    """
+    h = {}
+    with open(dem_asc) as f:
+        for _ in range(6):
+            k, v = f.readline().split(); h[k.lower()] = float(v)
+    dem = np.loadtxt(dem_asc, skiprows=6)
+    nr, nc, cs = int(h["nrows"]), int(h["ncols"]), h["cellsize"]
+    ytop = h["yllcorner"] + nr * cs
+
+    bed = {}
+    for ln in open(bci):
+        p = ln.split()
+        if len(p) < 5 or p[0] != "P":
+            continue
+        x, y = float(p[1]), float(p[2])
+        c = min(max(int((x - h["xllcorner"]) / cs), 0), nc - 1)
+        r = min(max(int((ytop - y) / cs), 0), nr - 1)
+        bed[p[4]] = float(dem[r, c])
+
+    lines = pathlib.Path(bdy).read_text().splitlines()
+    out, i, nraised, worst = [lines[0]], 1, 0, 0.0
+    while i < len(lines):
+        nm = lines[i].strip()
+        if not nm:
+            i += 1; continue
+        parts = lines[i + 1].split()
+        n, unit = int(parts[0]), (parts[1] if len(parts) > 1 else "seconds")
+        floor = bed.get(nm, -1e9) + margin
+        rows = []
+        for r_ in lines[i + 2:i + 2 + n]:
+            v, tt = r_.split()[:2]
+            v = float(v)
+            if v < floor:
+                worst = max(worst, floor - v); v = floor; nraised += 1
+            rows.append(f"{v:.4f}\t{float(tt):.1f}")
+        out += [nm, f"{n}\t\t{unit}"] + rows
+        i += 2 + n
+    bdy_out = bdy_out or bdy
+    pathlib.Path(bdy_out).write_text("\n".join(out) + "\n")
+    print(f"clamped {nraised} samples to the fine bed (largest raise {worst:.2f} m) -> {bdy_out}")
+    return bdy_out
+
+
+if __name__ == "__main__" and "--clamp-bdy" in __import__("sys").argv:
+    import argparse, sys
+    ap = argparse.ArgumentParser(description="Clamp .bdy stages to the fine DEM bed")
+    ap.add_argument("--clamp-bdy", required=True); ap.add_argument("--bci", required=True)
+    ap.add_argument("--dem", required=True); ap.add_argument("--out", default=None)
+    a = ap.parse_args()
+    clamp_bdy_to_bed(a.bci, a.clamp_bdy, a.dem, bdy_out=a.out)
+    sys.exit(0)
+
+
 if __name__ == "__main__" and "--extend-bdy" in __import__("sys").argv:
     import argparse, sys
     ap = argparse.ArgumentParser(description="Extend .bdy blocks back to t=0")
