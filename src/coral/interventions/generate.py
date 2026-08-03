@@ -118,19 +118,42 @@ INTERVENTIONS = {
     # Spatial knobs are in METRES and are divided by the grid cell size at apply time, so the
     # same registry gives the same physical intervention at 30 m and at 4 m. Values below
     # reproduce the original cell-based ranges at 30 m.
+    # crest_m is supported: Charleston's Low Battery seawall was raised to about 2.74 m NAVD88
+    # and the USACE peninsula proposal is about 3.66 m. buffer_m is UNSOURCED.
     "seawall":   {"crest_m": (2.0, 4.5), "buffer_m": (30, 90)},
-    "marsh":     {"area_frac": (0.05, 0.30), "n_target": (0.08, 0.16),  # Spartina spectrum:
+    # Roughness bands widened DOWNWARD on 2026-08-03 to cover the observed distribution.
+    # Arefin et al. (2026), Est. Coast. Shelf Sci. 334, 109791, meta-analyse 36 studies and
+    # report a saltmarsh Manning's n interquartile range of 0.04-0.08 and a mangrove IQR of
+    # 0.10-0.14. The previous bands (marsh 0.08-0.16, mangrove 0.15-0.30, living shoreline
+    # 0.10-0.20) began at or above the literature's upper quartile, so the sampled range
+    # excluded realistic values entirely rather than merely being wide. Upper bounds are kept
+    # above the IQR deliberately: Arefin et al. report n increasing landward, so high marsh can
+    # legitimately exceed the pooled range, and a training ensemble wants the tails.
+    #
+    # NOTE: the completed 1506-member 30 m ensemble was sampled with the OLD bands. Its
+    # nature-based effect sizes are therefore upper bounds. Seawall and retreat are unaffected.
+    "marsh":     {"area_frac": (0.05, 0.30), "n_target": (0.03, 0.16),
                   "ksat_add": (10, 40), "awc_add": (50, 150), "corr_len_m": (450, 1500)},
-    #            n_target spans young/sparse (0.08) to mature/dense (0.16) emergent marsh,
-    #            a vegetation-density/height proxy (class-based; height dataset refines later).
-    "mangrove":  {"area_frac": (0.03, 0.15), "n_target": (0.15, 0.30),
+    #            Chow (1959) puts the 0.16 end at "medium to dense brush, summer"; the 0.03 end
+    #            is young or sparse Spartina, below the saltmarsh IQR floor.
+    # Mangrove is a NO-ANALOGUE scenario at this site. Pin Point is 31.95 N and the poleward
+    # Georgia mangrove records sit near 30.73 N, so this is a range-expansion hypothetical
+    # rather than a plantable option, and must be labelled as such wherever it is reported.
+    "mangrove":  {"area_frac": (0.03, 0.15), "n_target": (0.08, 0.16),
                   "ksat_add": (5, 20), "awc_add": (30, 100), "corr_len_m": (300, 1200)},
-    "living_shoreline": {"area_frac": (0.3, 0.7), "n_target": (0.10, 0.20),  # marsh-water edge
-                  "sill_m": (0.15, 0.40), "corr_len_m": (240, 750)},              # sill + roughness
+    "living_shoreline": {"area_frac": (0.3, 0.7), "n_target": (0.04, 0.16),  # marsh-water edge
+                  "sill_m": (0.15, 0.40), "corr_len_m": (240, 750)},
+    #            A sill with planted marsh behind it is a marsh surface, so the saltmarsh IQR
+    #            applies. sill_m is UNSOURCED as an absolute rise: NOAA and Georgia guidance set
+    #            the sill crest relative to MHW rather than as a fixed height above bed.
 
     "permeable": {"area_frac": (0.05, 0.25), "ksat_rate": (20, 60), "corr_len_m": (300, 1200)},
+    # natural_n is supported by Chow's pasture and cleared-land classes, 0.025-0.050.
     "retreat":   {"area_frac": (0.02, 0.12), "natural_n": (0.035, 0.05), "corr_len_m": (300, 900)},
-    "depave":    {"area_frac": (0.10, 0.50), "n_target": (0.06, 0.12),   # parking/impervious
+    # Chow (1959) floodplain classes: short-grass pasture 0.025-0.035, high grass 0.030-0.050,
+    # scattered brush and heavy weeds 0.035-0.070. The previous 0.06-0.12 band sat above all of
+    # them; only dense summer brush reaches it. Baseline asphalt is 0.013-0.016 for reference.
+    "depave":    {"area_frac": (0.10, 0.50), "n_target": (0.03, 0.10),   # parking/impervious
                   "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len_m": (240, 750)},  # to vegetated
 }
 
