@@ -92,3 +92,64 @@ if __name__ == "__main__":
     ap.add_argument("--out-bci", required=True); ap.add_argument("--out-bdy", required=True)
     a = ap.parse_args()
     nest_bdy(a.coarse, a.bbox, a.out_bci, a.out_bdy)
+
+
+def snap_bci_to_grid(bci_in, dem_asc, bci_out=None):
+    """Move every boundary point onto the centre of a real perimeter cell.
+
+    The points are generated from the requested clip bbox, but gdalwarp sets the DEM's actual
+    corner to whatever the resampling produced, which differs by a fraction of a degree. At
+    30 m a cell is 2.9e-4 degrees and that discrepancy is invisible. At 4 m a cell is 3.6e-5
+    degrees, and points on the bottom edge then compute to row nrows, one past the last valid
+    row. LISFLOOD receives a boundary point that maps to no cell and hangs searching for one:
+    the run reports a healthy 10 s timestep and never completes a second one.
+
+    Snapping preserves point count and order, so the paired .bdy stays valid. Points are moved
+    to the nearest perimeter cell centre, which is at most half a cell, well inside the
+    interpolation tolerance of the coarse field they were sampled from.
+    """
+    h = {}
+    with open(dem_asc) as f:
+        for _ in range(6):
+            k, v = f.readline().split(); h[k.lower()] = float(v)
+    nr, nc, cs = int(h["nrows"]), int(h["ncols"]), h["cellsize"]
+    x0, y0 = h["xllcorner"], h["yllcorner"]
+    ytop = y0 + nr * cs
+
+    def centre(r, c):
+        return x0 + (c + 0.5) * cs, ytop - (r + 0.5) * cs
+
+    bci_out = bci_out or bci_in
+    out, moved, kept = [], 0, 0
+    for ln in open(bci_in):
+        p = ln.split()
+        if len(p) < 3 or p[0] != "P":
+            out.append(ln.rstrip("\n")); continue
+        x, y = float(p[1]), float(p[2])
+        c = min(max(int((x - x0) / cs), 0), nc - 1)
+        r = min(max(int((ytop - y) / cs), 0), nr - 1)
+        # pull onto whichever perimeter it is nearest, so the point stays a boundary point
+        d = {"top": r, "bot": nr - 1 - r, "left": c, "right": nc - 1 - c}
+        side = min(d, key=d.get)
+        r = 0 if side == "top" else nr - 1 if side == "bot" else r
+        c = 0 if side == "left" else nc - 1 if side == "right" else c
+        nx, ny = centre(r, c)
+        if abs(nx - x) > 1e-12 or abs(ny - y) > 1e-12:
+            moved += 1
+        else:
+            kept += 1
+        out.append(f"P\t{nx:.7f}\t{ny:.7f}\t" + "\t".join(p[3:]))
+    pathlib.Path(bci_out).write_text("\n".join(out) + "\n")
+    print(f"snapped {moved} points, {kept} already on centres -> {bci_out}")
+    return bci_out
+
+
+if __name__ == "__main__" and "--snap-bci" in __import__("sys").argv:
+    import argparse, sys
+    ap = argparse.ArgumentParser(description="Snap a .bci onto real perimeter cell centres")
+    ap.add_argument("--snap-bci", required=True)
+    ap.add_argument("--dem", required=True)
+    ap.add_argument("--out", default=None)
+    a = ap.parse_args()
+    snap_bci_to_grid(a.snap_bci, a.dem, a.out)
+    sys.exit(0)
