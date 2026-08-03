@@ -212,6 +212,43 @@ def make_infil_ssurgo(soils_geojson, ksat_awc_json, dem_path, out_asc,
     return out_asc
 
 
+def mask_saturated(grid_asc, wetlands_geojson, dem_asc, out_asc=None, value=0.0):
+    """Zero the infiltration grid over permanently saturated wetland.
+
+    POLARIS and SSURGO report the conductivity and storage a soil would have if it were
+    draining. Salt marsh soil is at or near saturation through the tidal cycle, so it has no
+    available storage when a surge arrives and effectively no infiltration capacity. Applying
+    an unsaturated soil rate there lets the model drain water that in reality has nowhere to
+    go, which biases flood depth low over exactly the land class the marsh adaptations target.
+
+    The wetland footprint comes from NWI, the same layer that constrains where marsh
+    restoration may be sited, so the masked area and the intervention-eligible area agree by
+    construction.
+
+    This is a coarse treatment. It sets saturated cells to zero rather than modelling a water
+    table, and it applies the same rule to high marsh, which does drain between spring tides.
+    A defensible refinement would key the mask to elevation relative to mean high water.
+    """
+    from ..interventions.context_rasters import wetlands_mask
+    out_asc = out_asc or grid_asc
+    a = np.loadtxt(grid_asc, skiprows=6)
+    with open(grid_asc) as f:
+        hdr = [f.readline() for _ in range(6)]
+    wet = wetlands_mask(wetlands_geojson, dem_asc)
+    if wet.shape != a.shape:
+        raise SystemExit(f"wetland mask {wet.shape} does not match grid {a.shape}")
+    valid = a > -9990
+    n_before = int((wet & valid).sum())
+    a = np.where(wet & valid, value, a)
+    with open(out_asc, "w") as f:
+        f.writelines(hdr)
+        np.savetxt(f, a, fmt="%.4f")
+    frac = n_before / max(int(valid.sum()), 1)
+    print(f"saturated-wetland mask: {n_before} cells set to {value} ({frac:.1%} of valid) "
+          f"-> {out_asc}")
+    return out_asc
+
+
 def from_config(cfg, dem=None):
     """Build the infiltration grid(s) for a scenario:
       - always the Ksat rate grid (infilfile)  -> infil_<name>.asc
@@ -222,10 +259,21 @@ def from_config(cfg, dem=None):
         raise SystemExit(f"{cfg.name}: forcing.infiltration is null")
     dem = dem or cfg.domain.dem
     rate = make_infil(cfg.domain.bbox, dem, f"data/interim/infil_{cfg.name}.asc")
+    cap = None
     if cfg.forcing.infil_capped:
         cap = make_capacity(cfg.domain.bbox, dem, f"data/interim/infilcap_{cfg.name}.asc")
-        return rate, cap
-    return rate
+    # Marsh soil sits at saturation, so it has neither the conductivity nor the storage the
+    # soil survey reports. Masking is opt-in because it changes results: switching it on for a
+    # domain that was calibrated without it invalidates that calibration.
+    if getattr(cfg.forcing, "mask_saturated_wetland", False):
+        wl = getattr(cfg.interventions, "wetlands", None) if cfg.interventions else None
+        if not wl:
+            raise SystemExit("forcing.mask_saturated_wetland is set but interventions.wetlands "
+                             "gives no NWI layer to define the wetland footprint")
+        mask_saturated(rate, wl, dem)
+        if cap:
+            mask_saturated(cap, wl, dem)
+    return (rate, cap) if cap else rate
 
 
 if __name__ == "__main__":

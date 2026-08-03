@@ -92,6 +92,11 @@ class Forcing:
     #                                   tide is added onto the surge in the .bdy (make_tide.py).
     tide_station: str = "8670870"     # NOAA CO-OPS station id (Fort Pulaski, GA)
     slr_m: float = 0.0
+    # Salt marsh soil is at or near saturation through the tidal cycle, so the conductivity and
+    # storage a soil survey reports for it are unavailable when a surge arrives. Setting this
+    # zeroes both over the NWI wetland footprint. Off by default: it changes results, and the
+    # 30 m compound run was calibrated against high-water marks without it.
+    mask_saturated_wetland: bool = False
 
     def __post_init__(self):
         if self.rainfall is not None:
