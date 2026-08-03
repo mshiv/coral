@@ -74,10 +74,12 @@ if [ "$RERUN" -eq 1 ]; then
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     NTOT=$(( NTOT + 1 ))
-    # A zero-byte or truncated .max is NOT finished: a member killed mid-write, or one that
-    # hit a quota, leaves a stub that `ls` happily reports. Require a plausible header.
-    if [ -n "$(find "$d"/results_*/ -maxdepth 1 -name '*.max' -size +64c 2>/dev/null | head -1)" ] \
-       && head -1 $(find "$d"/results_*/ -maxdepth 1 -name '*.max' | head -1) 2>/dev/null | grep -qi '^ncols'; then
+    # A .max is only finished if it is complete. A member killed mid-write, or one that hit a
+    # quota, can leave a file with a perfectly good six-line header and a data block that
+    # stops partway through, which a header check passes and np.loadtxt then rejects. Compare
+    # the file size against what the header declares: values occupy at least three bytes per
+    # cell, so a complete grid clears that bound easily and a truncated one misses it widely.
+    if valid_max "$d"; then
       NDONE=$(( NDONE + 1 ))
     else
       echo "$d" >> "$MISS" || { echo "FAIL: write to $MISS failed partway (quota?)."; exit 1; }
@@ -109,6 +111,16 @@ N=$(wc -l < "$( [ "$RERUN" -eq 1 ] && echo run_dirs_missing.txt || echo run_dirs
 END=${END:-$N}
 
 log() { echo "[$(date '+%m-%d %H:%M:%S')] $*"; }
+
+valid_max() {
+  local f
+  f=$(find "$1"/results_*/ -maxdepth 1 -name '*.max' 2>/dev/null | head -1)
+  [ -n "$f" ] || return 1
+  awk 'NR<=6{k=tolower($1); v=$2; if(k=="ncols")c=v; if(k=="nrows")r=v}
+       NR==7{exit} END{if(c>0&&r>0) print int(3*c*r); else print -1}' "$f" 2>/dev/null \
+  | { read -r floor; [ "${floor:--1}" -gt 0 ] || return 1
+      [ "$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")" -ge "$floor" ]; }
+}
 
 # ---- discover the limits rather than assuming them
 MAXARR=$(scontrol show config 2>/dev/null | awk -F= '/MaxArraySize/{gsub(/ /,"",$2); print $2}')

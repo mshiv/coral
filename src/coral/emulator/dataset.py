@@ -73,13 +73,27 @@ def read_asc_cached(path):
 
 
 def read_asc(path):
-    """Read an ESRI ASCII grid -> (array with nodata=nan, header dict)."""
+    """Read an ESRI ASCII grid -> (array with nodata=nan, header dict).
+
+    Failures are re-raised naming the file. numpy's own message ("the number of columns
+    changed from 1356 to 1045 at row 39") says nothing about which of 1506 members is at
+    fault, which turns a one-line fix into a search.
+    """
     h = {}
-    with open(path) as f:
-        for _ in range(6):
-            k, v = f.readline().split()
-            h[k.lower()] = float(v)
-        a = np.loadtxt(f)
+    try:
+        with open(path) as f:
+            for _ in range(6):
+                k, v = f.readline().split()
+                h[k.lower()] = float(v)
+            a = np.loadtxt(f)
+    except ValueError as e:
+        raise ValueError(f"{path} is not a readable ESRI ASCII grid ({e}). A truncated grid "
+                         "usually means the run was killed mid-write or hit a disk quota; "
+                         "rerun that member.") from e
+    exp = (int(h["nrows"]), int(h["ncols"]))
+    if a.shape != exp:
+        raise ValueError(f"{path} holds {a.shape} but its header declares {exp}; the file is "
+                         "incomplete. Rerun that member.")
     nod = h.get("nodata_value", -9999)
     return np.where(a == nod, np.nan, a), h
 
@@ -222,21 +236,34 @@ def build_manifest(runs, skip_missing=False):
 
 
 def is_valid_max(path):
-    """True if `path` looks like a real ESRI ASCII grid rather than a stub.
+    """True if `path` looks like a complete ESRI ASCII grid.
 
-    A member killed while writing, or one that hit a disk quota, leaves a zero-byte or
-    truncated .max behind. Checking only for existence counts those as finished, so the
-    ensemble reports complete and training then dies on the first unreadable header. The
-    cheap discriminator is the first header line: `ncols <n>`.
+    A member killed while writing, or one that hit a disk quota, leaves a .max that is either
+    empty or truncated partway through the data block. A header check alone is not enough:
+    such a file can carry a perfectly good six-line header and then stop mid-grid, which
+    np.loadtxt only discovers when the column count changes at some row.
+
+    The check is header parse plus a file-size floor computed from the header itself. Values
+    are written as "0.0000 " and similar, so at least three bytes per cell is a conservative
+    bound that a truncated file fails by a wide margin and a complete file passes easily. This
+    is a stat, not a read, so it stays cheap across a 1506-member ensemble.
     """
     try:
         p = Path(path)
-        if not p.is_file() or p.stat().st_size < 64:
+        if not p.is_file():
             return False
         with open(p) as f:
-            parts = f.readline().split()
-        return len(parts) == 2 and parts[0].lower() == "ncols" and int(float(parts[1])) > 0
-    except (OSError, ValueError):
+            h = {}
+            for _ in range(6):
+                parts = f.readline().split()
+                if len(parts) != 2:
+                    return False
+                h[parts[0].lower()] = float(parts[1])
+        ncols, nrows = int(h["ncols"]), int(h["nrows"])
+        if ncols <= 0 or nrows <= 0:
+            return False
+        return p.stat().st_size >= 3 * ncols * nrows
+    except (OSError, ValueError, KeyError):
         return False
 
 
