@@ -8,11 +8,27 @@ modest LISFLOOD ensemble, a heavy net overfits.
 from __future__ import annotations
 
 
+def _norm(ch, groups=8):
+    """GroupNorm rather than BatchNorm.
+
+    Training runs at batch size 1, because one sample is a full 1356x882 field. BatchNorm
+    estimates running mean and variance from the batch, so at batch size 1 those estimates are
+    extremely noisy and the running statistics used at eval time diverge from the per-batch
+    statistics used during training. The symptom is a validation metric that bounces between
+    runs with no relation to how much data was used: a learning curve over 130, 255, 630 and
+    1255 members returned 0.212, 1.059, 0.260 and 0.338 m, which is not a data-size effect.
+    GroupNorm normalises over channel groups within a single sample, so it is independent of
+    batch size and behaves identically in train and eval.
+    """
+    import torch.nn as nn
+    return nn.GroupNorm(min(groups, ch), ch)
+
+
 def _double_conv(cin, cout):
     import torch.nn as nn
     return nn.Sequential(
-        nn.Conv2d(cin, cout, 3, padding=1), nn.BatchNorm2d(cout), nn.ReLU(inplace=True),
-        nn.Conv2d(cout, cout, 3, padding=1), nn.BatchNorm2d(cout), nn.ReLU(inplace=True),
+        nn.Conv2d(cin, cout, 3, padding=1), _norm(cout), nn.ReLU(inplace=True),
+        nn.Conv2d(cout, cout, 3, padding=1), _norm(cout), nn.ReLU(inplace=True),
     )
 
 
