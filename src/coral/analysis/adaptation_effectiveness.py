@@ -44,7 +44,7 @@ def _cell_area_m2(dem_asc):
 
 
 def compare_pair(base_max, adapt_max, dem_asc, *, footprints=None, first_floor_m=0.0,
-                 wet_thresh=0.05):
+                 wet_thresh=0.05, adapt_dem=None):
     """Metrics for one adaptation run against its matched baseline. Negative deltas are
     improvements: fewer buildings flooded, less water."""
     b, a = read_depth(base_max), read_depth(adapt_max)
@@ -65,14 +65,29 @@ def compare_pair(base_max, adapt_max, dem_asc, *, footprints=None, first_floor_m
     if not footprints:
         return out
 
+    # Structures the adaptation demolished are dropped from BOTH sides. Excluding them only
+    # from the adapted count would compare different building populations and flatter the
+    # adaptation; excluding from neither counts flooding at houses that no longer exist.
+    excl = None
+    if adapt_dem is not None:
+        from .building_exposure import removed_buildings, read_depth as _rd
+        bd_grid = np.loadtxt(dem_asc, skiprows=6)
+        ad_grid = np.loadtxt(adapt_dem, skiprows=6)
+        excl = removed_buildings(footprints, dem_asc, bd_grid, ad_grid)
+
     # pass the grids already read above; without this each .max is parsed twice per pair
-    br, bs = exposure(base_max, footprints, dem_asc, first_floor_m=first_floor_m, depth=b)
-    ar, asum = exposure(adapt_max, footprints, dem_asc, first_floor_m=first_floor_m, depth=a)
+    br, bs = exposure(base_max, footprints, dem_asc, first_floor_m=first_floor_m,
+                      depth=b, exclude=excl)
+    ar, asum = exposure(adapt_max, footprints, dem_asc, first_floor_m=first_floor_m,
+                        depth=a, exclude=excl)
     key = "depth_interior_m" if first_floor_m else "depth_ground_m"
     bd = np.array([r[key] for r in br]); ad = np.array([r[key] for r in ar])
+    if excl is not None:                       # newly wet/dry must use the same population
+        bd, ad = bd[~excl], ad[~excl]
     t0 = THRESHOLDS[0][1]
     out.update({
         "n_buildings": bs["n_buildings"],
+        "n_removed": bs.get("n_excluded", 0),
         "newly_dry": int(((bd > t0) & (ad <= t0)).sum()),
         "newly_wet": int(((bd <= t0) & (ad > t0)).sum()),
         "mean_depth_flooded_m_base": bs["mean_depth_flooded_m"],
@@ -152,8 +167,17 @@ def run_ensemble(ensemble_dir, dem_asc, *, footprints=None, first_floor_m=0.0,
             amax = _max_path(m, ens)
             if not amax:
                 skipped += 1; continue
+            # Only retreat removes structures. Passing the member DEM enables the exclusion;
+            # for kinds that raise or leave the DEM alone it would be a no-op but costs a read.
+            adem = None
+            if footprints and _kind(m) == "retreat":
+                rd = Path(m["run_dir"])
+                if not rd.is_absolute():
+                    rd = ens / rd.name
+                adem = next(iter(sorted(rd.glob("SUB_DEM*.asc"))), None)
             met = compare_pair(bmax, amax, dem_asc, footprints=footprints,
-                               first_floor_m=first_floor_m)
+                               first_floor_m=first_floor_m,
+                               adapt_dem=str(adem) if adem else None)
             iv = (m.get("interventions") or [{}])[0]
             rows.append({"name": m["name"], "slr_level": level,
                          "slr_m": float(m.get("forcing", {}).get("slr_m", 0.0)),

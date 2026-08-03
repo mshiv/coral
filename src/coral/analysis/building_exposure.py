@@ -89,8 +89,29 @@ def building_ids(footprints_geojson, dem_asc):
     return _IDS_CACHE[key]
 
 
+def removed_buildings(footprints_geojson, dem_asc, base_dem, adapt_dem, drop_m=0.10):
+    """Boolean per building: was it inside ground that the adaptation lowered?
+
+    Managed retreat buys out and demolishes structures, then regrades the land to natural
+    elevation. The footprint file is fixed across the ensemble, so without this those
+    demolished houses keep being counted as flooded in the retreat scenarios, which conflates
+    "water moved onto neighbours" with "we scored flooding at houses that no longer exist".
+
+    A building counts as removed if any cell its footprint touches was lowered by more than
+    `drop_m`. Lowering is the retreat signature specifically: a seawall raises the DEM and a
+    marsh does not change it at all, so this does not fire for them.
+    """
+    ids, gdf, shape, _ = building_ids(footprints_geojson, dem_asc)
+    lowered = np.nan_to_num(base_dem, nan=0.0) - np.nan_to_num(adapt_dem, nan=0.0) > drop_m
+    out = np.zeros(len(gdf) + 1, bool)
+    flat_ids = ids.ravel()
+    hit = (flat_ids > 0) & lowered.ravel()
+    out[flat_ids[hit]] = True
+    return out[1:]
+
+
 def exposure(max_asc, footprints_geojson, dem_asc, *, first_floor_m=0.0,
-             thresholds=THRESHOLDS, id_field=None, depth=None):
+             thresholds=THRESHOLDS, id_field=None, depth=None, exclude=None):
     """Sample peak depth at every building footprint.
 
     Returns (rows, summary). `rows` is a list of dicts, one per building, with the zonal-max
@@ -135,13 +156,15 @@ def exposure(max_asc, footprints_geojson, dem_asc, *, first_floor_m=0.0,
     labels = list(gdf[id_field].astype(str)) if id_field and id_field in gdf.columns \
         else [str(i) for i in range(len(gdf))]
     ground = zmax[1:]
+    keep = np.ones(len(gdf), bool) if exclude is None else ~np.asarray(exclude, bool)
     interior = np.clip(ground - first_floor_m, 0, None)
     rows = [{"building_id": labels[i], "depth_ground_m": float(ground[i]),
              "depth_interior_m": float(interior[i])} for i in range(len(gdf))]
 
-    d = interior if first_floor_m else ground
+    d = (interior if first_floor_m else ground)[keep]
     flooded = d[d > thresholds[0][1]]
-    summary = {"n_buildings": int(len(gdf)),
+    summary = {"n_buildings": int(keep.sum()),
+               "n_excluded": int((~keep).sum()),
                "n_outside_grid": int(outside),
                "first_floor_m": float(first_floor_m),
                "mean_depth_flooded_m": float(flooded.mean()) if flooded.size else 0.0,
