@@ -38,6 +38,23 @@ def _coarse_wse_series(coarse_dir, root, dry_thresh=0.05):
     return dem, x, y, np.array(stack)
 
 
+def _fill_holding(series):
+    """Forward then backward fill a series, holding the nearest finite value.
+
+    Returns None if the series is entirely dry, which the caller drops. Never invents a value
+    from outside the observed stage range.
+    """
+    v = np.asarray(series, dtype="float64").copy()
+    ok = np.isfinite(v)
+    if not ok.any():
+        return None
+    idx = np.where(ok, np.arange(len(v)), -1)
+    np.maximum.accumulate(idx, out=idx)                 # forward fill
+    first = int(np.argmax(ok))
+    idx[idx < 0] = first                                # backward fill the leading gap
+    return v[idx]
+
+
 def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
              saveint=1800.0, t0=86400.0, spacing_m=30.0, dry_thresh=0.05,
              wet_frac=0.25, inset_deg=1e-5):
@@ -64,8 +81,22 @@ def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
         series = wse[:, j, i]
         if np.isfinite(series).mean() < wet_frac:      # rarely wet -> not a water boundary
             continue
-        # fill dry gaps with the coarse ground (DEM) so the series is complete
-        filled = np.where(np.isfinite(series), series, dem[j, i])
+        # Fill dry gaps by holding the nearest wet stage, never with the ground elevation.
+        #
+        # Filling with dem[j, i] writes a "water surface" at bed level, which in a tidal
+        # channel is several metres below datum. LISFLOOD takes an HVAR value as a water
+        # surface and forms depth = WSE - bed on the FINE grid, whose bed differs from the
+        # coarse one, so the result is negative. sqrt(g*h) on a negative depth is NaN, the
+        # timestep becomes NaN, and the run loops forever while reporting a healthy timestep
+        # and consuming every core. That failure took thirteen diagnostic runs to isolate.
+        #
+        # Holding the nearest wet value keeps the series a physically meaningful stage
+        # throughout. A point that is dry simply sits at the last stage it had, which is the
+        # correct one-way nesting statement: no information flows from the fine grid back to
+        # the coarse one, so a dry perimeter cell should impose no head gradient.
+        filled = _fill_holding(series)
+        if filled is None:
+            continue
         kept.append((lon, lat)); blocks.append(filled)
 
     if not kept:
