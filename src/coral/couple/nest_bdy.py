@@ -139,7 +139,7 @@ def snap_bci_to_grid(bci_in, dem_asc, bci_out=None):
         else:
             kept += 1
         out.append(f"P\t{nx:.7f}\t{ny:.7f}\t" + "\t".join(p[3:]))
-    pathlib.Path(bci_out).write_text("\n".join(out) + "\n")
+    Path(bci_out).write_text("\n".join(out) + "\n")
     print(f"snapped {moved} points, {kept} already on centres -> {bci_out}")
     return bci_out
 
