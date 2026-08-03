@@ -37,38 +37,74 @@ def _grid(dem_asc):
     return (ny, nx), from_origin(h["xllcorner"], h["yllcorner"] + ny * cs, cs, cs)
 
 
-def read_depth(max_asc):
-    """Read a `.max` as a depth array with nodata and negatives set to 0."""
+_DEPTH_CACHE = {}
+_DEPTH_CACHE_MAX = 4
+
+
+def read_depth(max_asc, cache=True):
+    """Read a `.max` as a depth array with nodata and negatives set to 0.
+
+    Small cache because an ensemble comparison reads one baseline against every member at its
+    sea level, so the same baseline grid is re-read a few hundred times in a row. Four entries
+    is enough for that access pattern and costs about 40 MB. Callers must not mutate the
+    returned array in place; every use here derives new arrays.
+    """
+    key = str(max_asc)
+    if cache and key in _DEPTH_CACHE:
+        return _DEPTH_CACHE[key]
     a = np.loadtxt(max_asc, skiprows=6)
-    return np.where((a <= -9990) | ~np.isfinite(a), 0.0, np.clip(a, 0, None))
+    d = np.where((a <= -9990) | ~np.isfinite(a), 0.0, np.clip(a, 0, None))
+    if cache:
+        if len(_DEPTH_CACHE) >= _DEPTH_CACHE_MAX:
+            _DEPTH_CACHE.pop(next(iter(_DEPTH_CACHE)))
+        _DEPTH_CACHE[key] = d
+    return d
+
+
+_IDS_CACHE = {}
+
+
+def building_ids(footprints_geojson, dem_asc):
+    """Rasterized footprint index+1 on the DEM grid, memoized.
+
+    This depends only on the footprints and the grid, so it is identical for every member of
+    an ensemble. Recomputing it per member costs a few tenths of a second each, which over
+    1506 members compared against their baselines is several thousand redundant
+    rasterizations. Keyed on both paths plus the grid shape.
+    """
+    from rasterio.features import rasterize
+    import geopandas as gpd
+    shape, tr = _grid(dem_asc)
+    key = (str(footprints_geojson), str(dem_asc), shape)
+    hit = _IDS_CACHE.get(key)
+    if hit is not None:
+        return hit
+    gdf = gpd.read_file(footprints_geojson).to_crs(4326).reset_index(drop=True)
+    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
+    if len(gdf) == 0:
+        raise SystemExit(f"no usable geometry in {footprints_geojson}")
+    ids = rasterize([(g, i + 1) for i, g in enumerate(gdf.geometry)],
+                    out_shape=shape, transform=tr, fill=0, all_touched=True, dtype="int32")
+    _IDS_CACHE[key] = (ids, gdf, shape, tr)
+    return _IDS_CACHE[key]
 
 
 def exposure(max_asc, footprints_geojson, dem_asc, *, first_floor_m=0.0,
-             thresholds=THRESHOLDS, id_field=None):
+             thresholds=THRESHOLDS, id_field=None, depth=None):
     """Sample peak depth at every building footprint.
 
     Returns (rows, summary). `rows` is a list of dicts, one per building, with the zonal-max
     ground depth and the depth after the first-floor offset. `summary` counts buildings above
     each threshold, plus the mean and 90th-percentile depth over the flooded ones.
     """
-    import geopandas as gpd
-    from rasterio.features import rasterize
-
-    shape, tr = _grid(dem_asc)
-    depth = read_depth(max_asc)
+    # `depth` lets a caller pass an already-read grid, so a pair comparison reads each .max
+    # once rather than once for the domain metrics and again here.
+    ids, gdf, shape, tr = building_ids(footprints_geojson, dem_asc)
+    if depth is None:
+        depth = read_depth(max_asc)
     if depth.shape != shape:
         raise SystemExit(f"{Path(max_asc).name} is {depth.shape} but the DEM grid is {shape}. "
                          "The .max must come from a run on this DEM.")
-
-    gdf = gpd.read_file(footprints_geojson).to_crs(4326).reset_index(drop=True)
-    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
-    if len(gdf) == 0:
-        raise SystemExit(f"no usable geometry in {footprints_geojson}")
-
-    # Rasterize footprint index+1 so 0 means "no building". all_touched matches buildings_mask,
-    # and at 30 m most footprints are sub-cell so this is what makes them visible at all.
-    ids = rasterize([(g, i + 1) for i, g in enumerate(gdf.geometry)],
-                    out_shape=shape, transform=tr, fill=0, all_touched=True, dtype="int32")
 
     # zonal max in one pass rather than per-polygon masking, which would be O(n_buildings) reads
     zmax = np.zeros(len(gdf) + 1, "float64")

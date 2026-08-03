@@ -65,8 +65,9 @@ def compare_pair(base_max, adapt_max, dem_asc, *, footprints=None, first_floor_m
     if not footprints:
         return out
 
-    br, bs = exposure(base_max, footprints, dem_asc, first_floor_m=first_floor_m)
-    ar, asum = exposure(adapt_max, footprints, dem_asc, first_floor_m=first_floor_m)
+    # pass the grids already read above; without this each .max is parsed twice per pair
+    br, bs = exposure(base_max, footprints, dem_asc, first_floor_m=first_floor_m, depth=b)
+    ar, asum = exposure(adapt_max, footprints, dem_asc, first_floor_m=first_floor_m, depth=a)
     key = "depth_interior_m" if first_floor_m else "depth_ground_m"
     bd = np.array([r[key] for r in br]); ad = np.array([r[key] for r in ar])
     t0 = THRESHOLDS[0][1]
