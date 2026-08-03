@@ -14,6 +14,7 @@ model (water actually enters there). Times are on the model clock, matching the 
 Deps: numpy (+ the emulator read_asc helper).
 """
 from __future__ import annotations
+import pathlib
 from pathlib import Path
 import numpy as np
 from ..emulator.dataset import read_asc
@@ -142,6 +143,52 @@ def snap_bci_to_grid(bci_in, dem_asc, bci_out=None):
     Path(bci_out).write_text("\n".join(out) + "\n")
     print(f"snapped {moved} points, {kept} already on centres -> {bci_out}")
     return bci_out
+
+
+def extend_bdy_to_zero(bdy_in, bdy_out=None):
+    """Extend every HVAR block back to t = 0 by holding its first value.
+
+    LISFLOOD locates the pair of samples bracketing the current model time by scanning the
+    series. A series that begins after t = 0 leaves nothing to find below its first entry, and
+    the run hangs: it reports a healthy timestep, burns every core, and never completes a
+    second step. The working 30 m boundary starts at 0.00000; this one started at 86400 s
+    because nest_bdy wrote the coarse run's absolute clock.
+
+    Holding the first value back to zero is safe here because the sampled series begins a day
+    before landfall, when the coarse field is at its undisturbed tidal stage. It changes
+    nothing inside the window that is actually simulated.
+    """
+    lines = pathlib.Path(bdy_in).read_text().splitlines()
+    out = [lines[0]]                       # comment header
+    i, nfix = 1, 0
+    while i < len(lines):
+        name = lines[i].strip()
+        if not name:
+            i += 1; continue
+        parts = lines[i + 1].split()
+        n, unit = int(parts[0]), (parts[1] if len(parts) > 1 else "seconds")
+        rows = lines[i + 2:i + 2 + n]
+        first = rows[0].split()
+        t0 = float(first[1])
+        if t0 > 0:
+            rows = [f"{float(first[0]):.4f}\t0.0"] + rows
+            n += 1; nfix += 1
+        out += [name, f"{n}\t\t{unit}"] + rows
+        i += 2 + int(parts[0])
+    bdy_out = bdy_out or bdy_in
+    pathlib.Path(bdy_out).write_text("\n".join(out) + "\n")
+    print(f"extended {nfix} blocks back to t=0 -> {bdy_out}")
+    return bdy_out
+
+
+if __name__ == "__main__" and "--extend-bdy" in __import__("sys").argv:
+    import argparse, sys
+    ap = argparse.ArgumentParser(description="Extend .bdy blocks back to t=0")
+    ap.add_argument("--extend-bdy", required=True)
+    ap.add_argument("--out", default=None)
+    a = ap.parse_args()
+    extend_bdy_to_zero(a.extend_bdy, a.out)
+    sys.exit(0)
 
 
 if __name__ == "__main__" and "--snap-bci" in __import__("sys").argv:
