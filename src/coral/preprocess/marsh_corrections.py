@@ -42,6 +42,13 @@ WETLAND_NLCD = (90, 95)
 # canopy cannot push n above what the observational record supports.
 AREFIN_N_LO, AREFIN_N_HI = 0.045, 0.145
 
+# Ceiling on how far a marsh cell may be lowered. Hladik and Alber report Georgia Spartina
+# offsets of order 0.1-0.3 m, and the observed marsh canopy p90 at Pin Point is 1.39 m, so a
+# correction beyond a metre is not vegetation bias -- it is an NLCD class-95 cell that actually
+# contains trees. Uncapped, those cells were being lowered by up to 22.5 m, gouging pits into
+# the marsh platform that would act as artificial sinks and destabilise the timestep.
+MAX_MARSH_DROP_M = 1.0
+
 
 def read_asc(path):
     h = {}
@@ -88,7 +95,8 @@ def mask_marsh_infiltration(infil_asc, infilcap_asc, classes_asc, out_infil, out
 
 
 def correct_marsh_dem(dem_asc, classes_asc, out_dem, offset=None, chm_asc=None,
-                      chm_fraction=0.5, codes=MARSH_NLCD, nodata=-9999.0, log_csv=None):
+                      chm_fraction=0.5, codes=MARSH_NLCD, nodata=-9999.0, log_csv=None,
+                      max_drop=MAX_MARSH_DROP_M):
     """Lower marsh cells to remove lidar canopy bias. Returns the edited DEM path.
 
     `offset` subtracts a constant. `chm_asc` subtracts `chm_fraction` x canopy height, which is
@@ -110,7 +118,13 @@ def correct_marsh_dem(dem_asc, classes_asc, out_dem, offset=None, chm_asc=None,
     else:
         raise SystemExit("supply either --offset or --chm")
 
+    n_capped = int((drop > max_drop).sum())
+    drop = np.minimum(drop, max_drop)
     out = np.where(m, dem - drop, dem)
+    if n_capped:
+        print(f"  {n_capped} cells capped at {max_drop:.2f} m "
+              f"({100*n_capped/max(int(m.sum()),1):.2f}% of marsh; these are class-95 cells "
+              "containing trees, not marsh canopy)")
     write_asc(out_dem, out, h, nodata)
     print(f"marsh DEM lowered on {int(m.sum())} cells; mean drop {drop[m].mean():.3f} m, "
           f"max {drop[m].max():.3f} m -> {out_dem}")
@@ -169,6 +183,9 @@ def main():
     b.add_argument("--offset", type=float, default=None)
     b.add_argument("--chm", default=None); b.add_argument("--chm-fraction", type=float, default=0.5)
     b.add_argument("--log", default=None)
+    b.add_argument("--max-drop", type=float, default=MAX_MARSH_DROP_M,
+                   help="ceiling on the marsh lowering (m); guards against class-95 cells "
+                        "that actually contain trees")
 
     c = sub.add_parser("manning", help="modulate marsh n by canopy height")
     c.add_argument("--manning", required=True); c.add_argument("--classes", required=True)
@@ -179,7 +196,7 @@ def main():
         mask_marsh_infiltration(v.infil, v.infilcap, v.classes, v.out_infil, v.out_infilcap)
     elif v.cmd == "dem":
         correct_marsh_dem(v.dem, v.classes, v.out, offset=v.offset, chm_asc=v.chm,
-                          chm_fraction=v.chm_fraction, log_csv=v.log)
+                          chm_fraction=v.chm_fraction, log_csv=v.log, max_drop=v.max_drop)
     else:
         modulate_marsh_n(v.manning, v.classes, v.chm, v.out)
 
