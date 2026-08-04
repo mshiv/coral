@@ -57,7 +57,7 @@ def _fill_holding(series):
 
 def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
              saveint=1800.0, t0=86400.0, spacing_m=30.0, dry_thresh=0.05,
-             wet_frac=0.25, inset_deg=1e-5):
+             wet_frac=0.25, inset_deg=1e-5, edges="SEWN"):
     """Build the clip's .bci + .bdy from the coarse run. clip_bbox=[W,E,S,N].
     Boundary points are placed along the clip perimeter every ~spacing_m and kept only
     where the coarse cell is wet for >= wet_frac of the timesteps (water enters there).
@@ -72,8 +72,22 @@ def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
     step_deg = spacing_m / 111000.0
     # perimeter sample points (lon, lat), inset onto the outermost valid cells
     xs = np.arange(Wi, Ei, step_deg); ys = np.arange(Si, Ni, step_deg)
-    pts = ([(xx, Si) for xx in xs] + [(xx, Ni) for xx in xs] +
-           [(Wi, yy) for yy in ys] + [(Ei, yy) for yy in ys])
+    # Only the edges named in `edges` get a prescribed stage. The rest stay closed, which is
+    # LISFLOOD's default for an edge with no .bci entry.
+    #
+    # Prescribing stage on all four sides is what wrecked the first 4 m run. A point-source
+    # HVAR hard-overwrites the cell depth every timestep (iterateq.cpp:566), so each point is
+    # an infinite reservoir rather than a flux boundary. Ringing the domain with them pins the
+    # interior on every side and leaves it no outlet: mass error accumulated to ~1e7 m3, about
+    # the entire final volume, and the water surface reached 29 m against a 5.47 m boundary.
+    #
+    # The validated 30 m parent uses 62 points along its seaward edge alone. This matches that.
+    sel = {"S": [(xx, Si) for xx in xs], "N": [(xx, Ni) for xx in xs],
+           "W": [(Wi, yy) for yy in ys], "E": [(Ei, yy) for yy in ys]}
+    bad = set(edges.upper()) - set(sel)
+    if bad:
+        raise SystemExit(f"unknown edge(s) {sorted(bad)}; use letters from SEWN")
+    pts = [pt for e in edges.upper() for pt in sel[e]]
 
     kept, blocks = [], []
     for lon, lat in pts:
@@ -111,9 +125,88 @@ def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
             f.write(f"bc{k}\n{T}\t\tseconds\n")
             for v, tt in zip(ser, times):
                 f.write(f"{v:.4f}\t{tt:.1f}\t\n")
-    print(f"nested boundary: {len(kept)} wet points, {T} timesteps "
+    print(f"nested boundary: edges={edges.upper()}, {len(kept)} wet points, {T} timesteps "
           f"({times[0]:.0f}-{times[-1]:.0f} s) -> {out_bci}, {out_bdy}")
     return {"points": len(kept), "timesteps": T, "bci": out_bci, "bdy": out_bdy}
+
+
+def nest_bdy_edges(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
+                   saveint=1800.0, t0=86400.0, seg_m=120.0, dry_thresh=0.05,
+                   wet_frac=0.25, edges="SEWN"):
+    """Nest a clip boundary as LISFLOOD EDGE conditions rather than point sources.
+
+    Use this, not nest_bdy, when the clip's boundary IS the domain edge.
+
+    The two .bci forms take different code paths and behave differently:
+
+      P x y HVAR name    -> iterateq.cpp:566. Hard-overwrites the cell depth every timestep:
+                            `Arrptr->H[cell] = himp`. The cell is an infinite reservoir, not a
+                            flux boundary. Correct for injecting a hydrograph at an interior
+                            point (the 30 m parent does this along a diagonal coastline inside
+                            its domain), wrong for a domain edge.
+
+      N start end HVAR name -> boundary.cpp:251. Computes flux from the gradient between the
+                            prescribed stage and the interior cell, so water crosses in either
+                            direction as the head difference dictates. This is a true open
+                            boundary.
+
+    The first 4 m Pin Point run used the point form on all four edges. Every edge cell was
+    pinned to a prescribed stage with no outlet, mass error accumulated to roughly the entire
+    final volume, and the water surface reached 29.3 m against a 5.47 m boundary.
+
+    Pin Point is a marsh peninsula: all four edges are wet 24-43% of the time in the parent,
+    so no single edge is 'the seaward one' and restricting to one would be wrong. Edge BCs
+    handle that correctly, because an edge that is wet but not driving flow simply passes
+    water back out instead of holding it in.
+
+    Each edge is split into `seg_m` segments with an independent hydrograph, so alongshore
+    variation is preserved. Segments that are dry in the parent are omitted, leaving that
+    stretch closed (LISFLOOD's default for an edge with no .bci entry).
+    """
+    dem, x, y, wse = _coarse_wse_series(coarse_dir, root, dry_thresh)
+    T = wse.shape[0]
+    W, E, S, N = clip_bbox
+    step = seg_m / 111000.0
+
+    sel = {}
+    if "S" in edges.upper(): sel["S"] = ("x", np.arange(W, E, step), S)
+    if "N" in edges.upper(): sel["N"] = ("x", np.arange(W, E, step), N)
+    if "W" in edges.upper(): sel["W"] = ("y", np.arange(S, N, step), W)
+    if "E" in edges.upper(): sel["E"] = ("y", np.arange(S, N, step), E)
+    if not sel:
+        raise SystemExit(f"no valid edges in {edges!r}; use letters from SEWN")
+
+    rows, blocks, k = [], [], 0
+    for side, (axis, coords, fixed) in sel.items():
+        for c0 in coords:
+            c1 = c0 + step
+            mid = c0 + step / 2.0
+            lon, lat = (mid, fixed) if axis == "x" else (fixed, mid)
+            i = int(np.argmin(np.abs(x - lon))); j = int(np.argmin(np.abs(y - lat)))
+            series = wse[:, j, i]
+            if np.isfinite(series).mean() < wet_frac:
+                continue                      # dry stretch -> leave closed
+            filled = _fill_holding(series)
+            if filled is None:
+                continue
+            k += 1
+            rows.append(f"{side}\t{c0:.7f}\t{c1:.7f}\tHVAR\tbc{k}")
+            blocks.append(filled)
+
+    if not blocks:
+        raise SystemExit("no wet edge segments found in the coarse run")
+    times = t0 + np.arange(T) * saveint
+    with open(out_bci, "w") as f:
+        f.write("\n".join(rows) + "\n")
+    with open(out_bdy, "w") as f:
+        f.write("comment\n")
+        for n, ser in enumerate(blocks, 1):
+            f.write(f"bc{n}\n{T}\t\tseconds\n")
+            for v, tt in zip(ser, times):
+                f.write(f"{v:.4f}\t{tt:.1f}\t\n")
+    print(f"nested EDGE boundary: edges={edges.upper()}, {len(blocks)} segments of {seg_m:.0f} m, "
+          f"{T} timesteps ({times[0]:.0f}-{times[-1]:.0f} s) -> {out_bci}, {out_bdy}")
+    return {"segments": len(blocks), "timesteps": T, "bci": out_bci, "bdy": out_bdy}
 
 
 if __name__ == "__main__":
@@ -122,8 +215,22 @@ if __name__ == "__main__":
     ap.add_argument("--coarse", required=True, help="coarse run dir (DEM + results)")
     ap.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "E", "S", "N"))
     ap.add_argument("--out-bci", required=True); ap.add_argument("--out-bdy", required=True)
+    ap.add_argument("--spacing", type=float, default=30.0, help="point spacing in metres")
+    ap.add_argument("--edge-bc", action="store_true",
+                    help="emit N/S/E/W edge conditions (flux-based, water crosses both ways) "
+                         "instead of P point sources (which hard-set cell depth). Use this "
+                         "when the clip boundary is the domain edge.")
+    ap.add_argument("--seg", type=float, default=120.0, help="edge segment length in metres")
+    ap.add_argument("--edges", default="SEWN",
+                    help="which clip edges get a prescribed stage, e.g. 'SE'. The rest stay "
+                         "closed. Prescribing all four (the default, kept for compatibility) "
+                         "pins the interior on every side and accumulates mass error.")
     a = ap.parse_args()
-    nest_bdy(a.coarse, a.bbox, a.out_bci, a.out_bdy)
+    if a.edge_bc:
+        nest_bdy_edges(a.coarse, a.bbox, a.out_bci, a.out_bdy, seg_m=a.seg, edges=a.edges)
+    else:
+        nest_bdy(a.coarse, a.bbox, a.out_bci, a.out_bdy,
+                 spacing_m=a.spacing, edges=a.edges)
 
 
 def snap_bci_to_grid(bci_in, dem_asc, bci_out=None):
