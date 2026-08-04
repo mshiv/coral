@@ -110,7 +110,21 @@ case "$MODE" in
       --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_curve.pt"
     ;;
-  *) bad "unknown mode $MODE (use holdout, valid, or curve)"; exit 1 ;;
+  curve50)
+    # Just the n=50 point of the learning curve. The 12 h run finished 5, 10 and 25 before
+    # timing out, and those checkpoints are already on disk; rerunning `curve` would spend
+    # GPU hours recomputing them. --report is separate so the n<=25 report is not clobbered:
+    # train_ensemble.py tags checkpoints with _n{N} but derives the report path from --ckpt.
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" \
+      --holdout-slr Int2070 \
+      --subsample-per-kind 50 \
+      --epochs 200 --patience 8 --workers 8 \
+      --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_curve.pt" \
+      --report "$OUTDIR/emulator_unet_curve_n50.report.json"
+    ;;
+  *) bad "unknown mode $MODE (use holdout, valid, curve, or curve50)"; exit 1 ;;
 esac
 RC=$?
 
