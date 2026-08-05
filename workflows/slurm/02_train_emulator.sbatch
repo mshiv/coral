@@ -27,8 +27,13 @@ set -uo pipefail
 export CORAL=/storage/home/hcoda1/6/smurugan9/data/dev/coral
 export SCR=/storage/home/hcoda1/6/smurugan9/scratch/coral
 export BASE=$SCR/runs/compound30m
-TRAIN=$SCR/runs/train30m
-VALID=$SCR/runs/valid30m
+# Ensemble to train on. Overridable so the corrected-physics ensemble can be trained without
+# editing the script: train30m has neither marsh correction, train30m_full has both.
+TRAIN=${TRAIN:-$SCR/runs/train30m}
+VALID=${VALID:-$SCR/runs/valid30m}
+# Decoded-grid cache is keyed on resolved paths, but keep ensembles in separate caches so a
+# corrected and an uncorrected grid at the same path cannot collide.
+CACHE_TAG=$(basename "$TRAIN")
 MODE=${1:-holdout}
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
@@ -68,13 +73,13 @@ log "$NDONE of $NPLAN members finished"
 [ "$NDONE" -ge 50 ] && ok "enough members to train on" \
   || { bad "only $NDONE members done; let the array run further"; exit 1; }
 
-OUTDIR=$CORAL/reports/emulator
+OUTDIR=$CORAL/reports/emulator/$CACHE_TAG
 mkdir -p "$OUTDIR"
 # Decoded-grid cache on scratch. Parsing the ASCII grids costs about 35 min per epoch over
 # 1506 members, which makes a 300-epoch run a week long. The first epoch fills this and the
 # rest reload from it. Keyed on the resolved path, so grids an intervention did not edit are
 # stored once across the whole ensemble rather than per member.
-CACHE=$SCR/interim/grid_cache
+CACHE=$SCR/interim/grid_cache_$CACHE_TAG
 mkdir -p "$CACHE"
 log "grid cache: $CACHE ($(du -sh "$CACHE" 2>/dev/null | cut -f1) so far)"
 
