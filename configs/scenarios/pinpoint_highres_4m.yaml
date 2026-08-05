@@ -32,8 +32,8 @@ forcing:
 interventions:
   kinds: [marsh, living_shoreline, seawall, depave, retreat]
   slr_levels: [0.0]
-  slr_scenarios: [["Int", 2050], ["Int", 2100]]
-  n_per_kind: 6                  # 3 SLR levels x (1 baseline + 5 kinds x 6) = 93 runs
+  slr_scenarios: [["Int", 2050], ["Int", 2070], ["Int", 2100], ["IntHigh", 2100], ["High", 2100]]
+  n_per_kind: 25                 # 6 SLR levels x (1 baseline + 5 kinds x 25) = 756 runs
   include_combos: false
   focus_radius_km: 3.0           # tight around Pin Point, matching the validation ensemble
   seed: 7
