@@ -31,9 +31,14 @@ import numpy as np
 MARSH_NLCD = (95,)
 WETLAND_NLCD = (90, 95)
 
-# Arefin et al. (2026) saltmarsh interquartile range. Modulation is clamped to this so a tall
-# canopy cannot push n above what the observational record supports.
-AREFIN_N_LO, AREFIN_N_HI = 0.045, 0.145
+# Arefin et al. (2026), Est. Coast. Shelf Sci. 334, 109791: saltmarsh Manning's n interquartile
+# range, from a meta-analysis of 36 studies. Modulation is clamped to this so a tall canopy
+# cannot push n past what the observational record supports.
+#
+# This is the SALTMARSH range. An earlier version used 0.045-0.145, which spans saltmarsh and
+# mangrove (mangrove IQR is 0.10-0.14) and would have assigned mangrove roughness to tall
+# Spartina. The intervention registry in interventions/generate.py keeps the same distinction.
+AREFIN_N_LO, AREFIN_N_HI = 0.04, 0.08
 
 # Ceiling on how far a marsh cell may be lowered. Hladik and Alber report Georgia Spartina
 # offsets of order 0.1-0.3 m, and the observed marsh canopy p90 at Pin Point is 1.39 m, so a

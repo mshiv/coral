@@ -158,14 +158,50 @@ INTERVENTIONS = {
 }
 
 
-def sample_intervention(kind, rng):
-    """Draw one config (dict of scalar knobs) for `kind` from its ranges."""
+# Height-to-roughness map for vegetation-specified interventions. Linear in height across the
+# Arefin saltmarsh IQR, anchored at the canopy heights actually observed on the Pin Point marsh
+# in the 3DEP CHM (median 0.48 m, p90 1.39 m).
+#
+# The linearity is an assumption, not a result: Arefin et al. give the range, not a functional
+# form. It is used because it is monotone, stays inside the observed bounds, and makes the
+# scenario statable in practitioner terms. Anything more elaborate would be unconstrained by the
+# data behind it.
+VEG_H_LO, VEG_H_HI = 0.2, 1.4          # m, sparse young Spartina -> mature stand
+VEG_N_LO, VEG_N_HI = 0.04, 0.08        # Arefin saltmarsh IQR
+
+
+def n_from_height(h_m):
+    """Manning's n for a target marsh canopy height, clamped to the saltmarsh IQR."""
+    f = (float(h_m) - VEG_H_LO) / (VEG_H_HI - VEG_H_LO)
+    f = min(max(f, 0.0), 1.0)
+    return round(VEG_N_LO + f * (VEG_N_HI - VEG_N_LO), 4)
+
+
+# Interventions whose roughness can be stated as a restoration target height instead of an n.
+# "Restore marsh to 0.8 m canopy" is actionable; "set n to 0.06" is not.
+HEIGHT_SPECIFIED = ("marsh", "living_shoreline")
+
+
+def sample_intervention(kind, rng, *, by_height=False):
+    """Draw one config (dict of scalar knobs) for `kind` from its ranges.
+
+    `by_height=True` samples a target canopy height for marsh-type interventions and derives
+    n_target from it, so the scenario is specified as a restoration target rather than as a
+    friction coefficient. The sampled n then lies inside the Arefin saltmarsh IQR by
+    construction, which is narrower than the registry band -- the registry keeps wider tails
+    deliberately, so the two modes are not interchangeable and should not be mixed in one
+    ensemble.
+    """
     if kind not in INTERVENTIONS:
         raise ValueError(f"unknown intervention {kind!r}; choose {list(INTERVENTIONS)}")
     knobs = {"kind": kind, "seed": int(rng.integers(1 << 30))}
     for k, (lo, hi) in INTERVENTIONS[kind].items():
         knobs[k] = (int(rng.integers(lo, hi + 1)) if isinstance(lo, int)
                     else round(float(rng.uniform(lo, hi)), 4))
+    if by_height and kind in HEIGHT_SPECIFIED:
+        knobs["veg_height_m"] = round(float(rng.uniform(VEG_H_LO, VEG_H_HI)), 3)
+        knobs["n_target"] = n_from_height(knobs["veg_height_m"])
+        knobs["n_from_height"] = True
     return knobs
 
 
