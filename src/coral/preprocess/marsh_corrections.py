@@ -47,6 +47,12 @@ AREFIN_N_LO, AREFIN_N_HI = 0.04, 0.08
 # the marsh platform that would act as artificial sinks and destabilise the timestep.
 MAX_MARSH_DROP_M = 1.0
 
+# Baseline n above this is not vegetation. Buildings are represented as roughness (n = 2.0)
+# rather than as raised DEM blocks, because 4 m vertical steps collapsed the timestep. Any
+# building footprint falling inside NLCD class 95 would otherwise be overwritten by the marsh
+# modulation and silently deleted from the model.
+STRUCTURE_N_FLOOR = 0.2
+
 # NWI WETLAND_TYPE values that are tidal, and therefore saturated during an event. This is the
 # classification the infiltration question actually turns on. NLCD 90 ("woody wetland") mixes
 # estuarine forested wetland with palustrine freshwater forest, which drains between events and
@@ -164,7 +170,8 @@ def correct_marsh_dem(dem_asc, classes_asc, out_dem, offset=None, chm_asc=None,
 
 
 def modulate_marsh_n(manning_asc, classes_asc, chm_asc, out_manning,
-                     codes=MARSH_NLCD, lo=AREFIN_N_LO, hi=AREFIN_N_HI, nodata=-9999.0):
+                     codes=MARSH_NLCD, lo=AREFIN_N_LO, hi=AREFIN_N_HI, nodata=-9999.0,
+                     structure_floor=STRUCTURE_N_FLOOR):
     """Vary n within the marsh class by canopy height, clamped to the Arefin saltmarsh IQR.
 
     Keeps the class map as the spatial structure and lets height set where a cell sits inside
@@ -176,6 +183,11 @@ def modulate_marsh_n(manning_asc, classes_asc, chm_asc, out_manning,
     cls, _ = read_asc(classes_asc)
     chm, _ = read_asc(chm_asc)
     m = _marsh_mask(cls, _, n_arr.shape, codes) & (n_arr != nodata)
+    struct = m & (n_arr > structure_floor)
+    if struct.any():
+        print(f"  preserving {int(struct.sum())} structure cells (n > {structure_floor}) "
+              "inside the marsh class; these are buildings encoded as roughness")
+        m = m & ~struct
     if not m.any():
         raise SystemExit("no marsh cells found; check the class raster and codes")
     hgt = np.clip(chm, 0, None)
