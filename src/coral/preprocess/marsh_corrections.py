@@ -191,6 +191,17 @@ def modulate_marsh_n(manning_asc, classes_asc, chm_asc, out_manning,
     if not m.any():
         raise SystemExit("no marsh cells found; check the class raster and codes")
     hgt = np.clip(chm, 0, None)
+    # Cells with no canopy signal carry no vegetation information, so they keep their baseline n.
+    # Mapping them through the percentile would put them at the bottom of the range -- the
+    # smoothest value available -- purely because the canopy product has nothing there. At 30 m
+    # these are open-water and developed EVH codes falling inside the NLCD marsh class.
+    nodata_veg = m & (hgt <= 0)
+    if nodata_veg.any():
+        print(f"  {int(nodata_veg.sum())} marsh cells have zero canopy; left at baseline n "
+              "(no vegetation signal, so not mapped to the smooth end)")
+        m = m & ~nodata_veg
+    if not m.any():
+        raise SystemExit("no marsh cells with canopy data")
     p5, p95 = np.percentile(hgt[m], [5, 95])
     frac = np.clip((hgt - p5) / max(p95 - p5, 1e-6), 0, 1)
     out = np.where(m, lo + frac * (hi - lo), n_arr)
