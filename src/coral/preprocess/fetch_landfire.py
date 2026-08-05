@@ -32,6 +32,12 @@ import numpy as np
 
 LFPS = "https://lfps.usgs.gov/api"
 
+# Layer names are LF<version>_EVH; the bare acronym is rejected ("Invalid products: 240EVH").
+# LF2016 is the default because Matthew is October 2016 and the vegetation state at the event is
+# what the roughness field should represent. Later versions are available and differ mainly in
+# disturbance updates. `list_products` prints what the service currently offers.
+DEFAULT_LAYER = "LF2016_EVH"
+
 # EVH class codes -> representative height (m). LANDFIRE encodes herbaceous height as 101-104,
 # shrub as 105-108, tree as 109-programmatic. Values are bin midpoints.
 EVH_CODE_M = {
@@ -52,7 +58,16 @@ def evh_code_to_m(codes):
     return out
 
 
-def fetch(bbox, out_zip, layer="240EVH", email=None):
+def list_products(acronyms=("EVH", "EVC", "EVT")):
+    """Print the CONUS layer names the service currently offers."""
+    with urllib.request.urlopen(f"{LFPS}/products", timeout=60) as r:
+        prods = json.load(r)["products"]
+    for p in sorted(prods, key=lambda x: (x["acronym"], x["version"])):
+        if p["acronym"] in acronyms and p.get("conus"):
+            print(f"  {p['layerName']:24s} {p['productName']}")
+
+
+def fetch(bbox, out_zip, layer=DEFAULT_LAYER, email=None):
     """Submit an LFPS job and download the result. bbox = (W, S, E, N) in WGS84.
 
     LFPS requires an Email parameter; it is used to notify on completion and the request is
@@ -127,13 +142,16 @@ def main():
     s = ap.add_subparsers(dest="cmd", required=True)
     f = s.add_parser("fetch")
     f.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "S", "E", "N"))
-    f.add_argument("--out", required=True); f.add_argument("--layer", default="240EVH")
+    f.add_argument("--out", required=True); f.add_argument("--layer", default=DEFAULT_LAYER)
     f.add_argument("--email", required=True, help="LFPS requires this; used for job notification")
+    s.add_parser("products", help="list available CONUS layer names")
     g = s.add_parser("grid")
     g.add_argument("--evh", required=True, help="EVH GeoTIFF (fetched or downloaded manually)")
     g.add_argument("--dem", required=True); g.add_argument("--out", required=True)
     a = ap.parse_args()
-    if a.cmd == "fetch":
+    if a.cmd == "products":
+        list_products()
+    elif a.cmd == "fetch":
         fetch(a.bbox, a.out, a.layer, a.email)
     else:
         grid(a.evh, a.dem, a.out)
