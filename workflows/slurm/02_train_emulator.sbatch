@@ -17,7 +17,7 @@
 # ships kernels for >=7.5 only, so torch.cuda.is_available() returns True and then the first
 # kernel launch fails. Usable here: rtx6000 (7.5), a100 (8.0), l40s (8.9), h100/h200 (9.0).
 #SBATCH -p gpu-a100
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=48G
 #SBATCH --time=12:00:00
 #SBATCH --output=coral-train_%j.log
