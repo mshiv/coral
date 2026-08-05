@@ -169,9 +169,14 @@ def correct_marsh_dem(dem_asc, classes_asc, out_dem, offset=None, chm_asc=None,
     return out_dem
 
 
+# Absolute height range for the height -> n map, matching interventions.generate. Anchors the
+# mapping to physical canopy height rather than to each raster's own distribution.
+VEG_H_LO, VEG_H_HI = 0.2, 1.4
+
+
 def modulate_marsh_n(manning_asc, classes_asc, chm_asc, out_manning,
                      codes=MARSH_NLCD, lo=AREFIN_N_LO, hi=AREFIN_N_HI, nodata=-9999.0,
-                     structure_floor=STRUCTURE_N_FLOOR):
+                     structure_floor=STRUCTURE_N_FLOOR, absolute=True):
     """Vary n within the marsh class by canopy height, clamped to the Arefin saltmarsh IQR.
 
     Keeps the class map as the spatial structure and lets height set where a cell sits inside
@@ -202,12 +207,21 @@ def modulate_marsh_n(manning_asc, classes_asc, chm_asc, out_manning,
         m = m & ~nodata_veg
     if not m.any():
         raise SystemExit("no marsh cells with canopy data")
-    p5, p95 = np.percentile(hgt[m], [5, 95])
-    frac = np.clip((hgt - p5) / max(p95 - p5, 1e-6), 0, 1)
+    if absolute:
+        # Fixed 0.2-1.4 m scale. Percentile rescaling normalises each raster to its own spread,
+        # which makes 4 m and 30 m fields incomparable and, worse, inflates a narrow one: the
+        # LANDFIRE herbaceous bins give a 0.60-0.90 m range over marsh, and stretching 0.3 m
+        # across the whole IQR turns a single 0.1 m bin step into a large roughness change.
+        lo_h, hi_h = VEG_H_LO, VEG_H_HI
+    else:
+        lo_h, hi_h = np.percentile(hgt[m], [5, 95])
+    frac = np.clip((hgt - lo_h) / max(hi_h - lo_h, 1e-6), 0, 1)
     out = np.where(m, lo + frac * (hi - lo), n_arr)
     write_asc(out_manning, out, hm, nodata)
     print(f"marsh n modulated on {int(m.sum())} cells: {out[m].min():.3f}-{out[m].max():.3f} "
-          f"(canopy {p5:.2f}-{p95:.2f} m mapped onto Arefin IQR {lo}-{hi}) -> {out_manning}")
+          f"(canopy {hgt[m].min():.2f}-{hgt[m].max():.2f} m on a "
+          f"{'fixed ' + format(lo_h, '.1f') + '-' + format(hi_h, '.1f') if absolute else 'percentile'} m "
+          f"scale -> Arefin IQR {lo}-{hi}) -> {out_manning}")
     return out_manning
 
 
@@ -236,6 +250,9 @@ def main():
     c = sub.add_parser("manning", help="modulate marsh n by canopy height")
     c.add_argument("--manning", required=True); c.add_argument("--classes", required=True)
     c.add_argument("--chm", required=True); c.add_argument("--out", required=True)
+    c.add_argument("--percentile", action="store_true",
+                   help="rescale by this raster's own 5-95 percentile instead of the fixed "
+                        "0.2-1.4 m scale; not comparable across resolutions")
 
     v = ap.parse_args()
     if v.cmd == "infil":
@@ -247,7 +264,7 @@ def main():
         correct_marsh_dem(v.dem, v.classes, v.out, offset=v.offset, chm_asc=v.chm,
                           chm_fraction=v.chm_fraction, log_csv=v.log, max_drop=v.max_drop)
     else:
-        modulate_marsh_n(v.manning, v.classes, v.chm, v.out)
+        modulate_marsh_n(v.manning, v.classes, v.chm, v.out, absolute=not v.percentile)
 
 
 if __name__ == "__main__":
