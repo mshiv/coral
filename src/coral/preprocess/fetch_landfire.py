@@ -159,9 +159,14 @@ def grid(evh_raster, dem_asc, out_asc, nodata=-9999.0):
     u, c = np.unique(codes, return_counts=True)
     print(f"EVH -> {out_asc}: {hm.min():.2f}-{hm.max():.2f} m, median {np.median(hm):.2f}")
     print("  top codes:", [(int(k), int(v)) for k, v in sorted(zip(u, c), key=lambda x: -x[1])[:6]])
-    if (hm == 0).mean() > 0.5:
-        print("  WARNING: over half the domain mapped to 0 m. Check the EVH codes against the "
-              "release you downloaded; EVH_CODE_M may need updating.")
+    # Only vegetated codes should carry height, so zeros over water, developed land and barren
+    # are expected -- on this coast open water alone is ~40% of the domain. Flag only when codes
+    # that DO name a height still map to zero, which is what a decoding failure looks like.
+    veg = np.isin(codes, [c for c, h in (lookup or {}).items() if h > 0]) if lookup else (hm > 0)
+    if veg.any() and (hm[veg] == 0).mean() > 0.01:
+        print("  WARNING: vegetated codes mapping to 0 m; the height decoding is wrong.")
+    print(f"  vegetated cells: {100*veg.mean():.1f}% of domain, "
+          f"median height there {np.median(hm[veg]) if veg.any() else 0:.2f} m")
     return out_asc
 
 
