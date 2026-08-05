@@ -66,6 +66,18 @@ if not torch.cuda.is_available():
     sys.exit(1)
 print(f"  device: {torch.cuda.get_device_name(0)}, "
       f"{torch.cuda.get_device_properties(0).total_memory/1e9:.0f} GB")
+# is_available() is not enough. On a V100 (compute capability 7.0) it returns True, and this
+# torch build ships kernels for >=7.5 only, so the failure surfaces at the first kernel launch
+# minutes into training with "no kernel image is available for execution on the device".
+# Launching a real kernel here turns that into an immediate, legible precondition failure.
+cc = torch.cuda.get_device_capability(0)
+try:
+    (torch.zeros(8, 8, device="cuda") @ torch.zeros(8, 8, device="cuda")).sum().item()
+    print(f"  kernel launch OK on compute capability {cc[0]}.{cc[1]}")
+except Exception as e:
+    print(f"  compute capability {cc[0]}.{cc[1]} has no kernels in this torch build: {e}")
+    print("  Use rtx6000 (7.5), a100 (8.0), l40s (8.9) or h100 (9.0), not v100 (7.0).")
+    sys.exit(1)
 PYCHK
 NDONE=$(ls "$TRAIN"/*/results_matthew_sav/res_matthew_sav.max 2>/dev/null | wc -l | tr -d ' ')
 NPLAN=$(wc -l < "$TRAIN/run_dirs.txt")
