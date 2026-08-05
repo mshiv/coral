@@ -1,32 +1,25 @@
-"""Two marsh corrections that must be applied before the 4 m decision ensemble.
+"""Land-surface corrections applied before the decision ensembles.
 
-1. ZERO INFILTRATION ON THE MARSH PLATFORM (`mask_marsh_infiltration`)
+Two are corrections to wrong assumptions, and belong in every run:
 
-   CORAL applies POLARIS/SSURGO storage-limited infiltration everywhere, including intertidal
-   marsh. Intertidal marsh soil is saturated: during an event there is no storage to fill, so
-   infiltration is negligible. Leaving it on lets the marsh absorb water it cannot absorb,
-   which suppresses inundation where marsh-restoration and living-shoreline
-   interventions are sited.
+  mask_marsh_infiltration  Tidal marsh soil is saturated; there is no storage to fill during an
+                           event. Applying storage-limited infiltration there lets the marsh
+                           absorb water it cannot, suppressing inundation exactly where marsh
+                           and living-shoreline interventions are sited.
 
-2. LIDAR VEGETATION BIAS IN THE DEM (`correct_marsh_dem`)
+  correct_marsh_dem        Bare-earth lidar over Spartina does not reach the ground; canopy
+                           returns are classified as ground and the DEM sits high. Hladik and
+                           Alber (2012) measured this for Georgia marsh. Uncorrected, it
+                           shrinks inundation extent and biases every adaptation delta.
 
-   Bare-earth lidar over Spartina does not reach the ground: dense canopy returns are
-   classified as ground, so the DEM sits above true marsh elevation. Hladik and Alber (2012)
-   measure this for Georgia salt marsh and correct it against species/height. An
-   uncorrected DEM shrinks inundation extent, and a systematic elevation bias
-   contaminates every matched-pair adaptation delta.
+One is a refinement, and is better reported as a separate sensitivity than folded into a
+baseline:
 
-   Two correction modes:
-     - `--offset`      a single constant subtracted from marsh cells (Hladik and Alber report
-                       order 0.1-0.3 m for Georgia Spartina).
-     - `--chm`         subtract a fraction of a canopy height model, cell by cell. Preferred
-                       when a CHM exists, since bias scales with canopy height.
+  modulate_marsh_n         Vary n within the marsh class by canopy height, clamped to the
+                           Arefin et al. (2026) saltmarsh IQR.
 
-   Every edited cell is logged to a sidecar CSV. The 4 m runs are the decision product and
-   reviewers will ask exactly which cells were altered and by how much.
-
-NOTE: The Barinas (2024) closed-form biomass-to-roughness form needs depth and velocity at 
-every timestep, which LISFLOOD-FP 8.0.3 cannot supply without solver changes.
+Not implemented: the Barinas (2024) biomass-to-roughness form needs depth and velocity every
+timestep, which LISFLOOD-FP 8.0.3 cannot supply, and was fitted on fluvial floodplains.
 """
 import argparse
 import csv
@@ -48,6 +41,13 @@ AREFIN_N_LO, AREFIN_N_HI = 0.045, 0.145
 # contains trees. Uncapped, those cells were being lowered by up to 22.5 m, gouging pits into
 # the marsh platform that would act as artificial sinks and destabilise the timestep.
 MAX_MARSH_DROP_M = 1.0
+
+# NWI WETLAND_TYPE values that are tidal, and therefore saturated during an event. This is the
+# classification the infiltration question actually turns on. NLCD 90 ("woody wetland") mixes
+# estuarine forested wetland with palustrine freshwater forest, which drains between events and
+# does have storage; masking it wholesale over-masks. NLCD 95 has the same problem in miniature,
+# lumping regularly-flooded low marsh with irregularly-flooded high marsh.
+NWI_TIDAL = ("Estuarine and Marine Wetland",)
 
 
 def read_asc(path):
@@ -76,12 +76,28 @@ def _marsh_mask(classes, h_cls, target_shape, codes):
 
 
 def mask_marsh_infiltration(infil_asc, infilcap_asc, classes_asc, out_infil, out_infilcap,
-                            codes=WETLAND_NLCD, nodata=-9999.0):
-    """Set infiltration rate and capacity to zero on marsh and woody wetland."""
+                            codes=WETLAND_NLCD, nodata=-9999.0, nwi_geojson=None, dem_asc=None):
+    """Zero infiltration rate and capacity on tidal wetland.
+
+    Both are zeroed, not just the rate: with capacity zero the storage-limited scheme has
+    nothing to give whatever Ksat says.
+
+    Default mask is NLCD codes 90 and 95. Pass `nwi_geojson` (with `dem_asc`) to mask on NWI
+    tidal types instead, which is the physically correct criterion -- saturation follows tidal
+    regime, not land cover.
+    """
     inf, hi = read_asc(infil_asc)
     cap, hc = read_asc(infilcap_asc)
-    cls, _ = read_asc(classes_asc)
-    m = _marsh_mask(cls, _, inf.shape, codes)
+    if nwi_geojson:
+        if not dem_asc:
+            raise SystemExit("--nwi needs --dem to rasterize onto")
+        from .make_manning import nwi_types_on_dem
+        types = nwi_types_on_dem(nwi_geojson, dem_asc)
+        m = np.isin(types.astype(str), NWI_TIDAL)
+        print(f"NWI mask: {sorted(set(types.ravel().tolist()) - {''})}")
+    else:
+        cls, _ = read_asc(classes_asc)
+        m = _marsh_mask(cls, _, inf.shape, codes)
     keep = inf != nodata
     inf_out = np.where(m & keep, 0.0, inf)
     cap_out = np.where(m & keep, 0.0, cap)
@@ -172,9 +188,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    a = sub.add_parser("infil", help="zero infiltration on marsh/wetland")
+    a = sub.add_parser("infil", help="zero infiltration on tidal wetland")
     a.add_argument("--infil", required=True); a.add_argument("--infilcap", required=True)
-    a.add_argument("--classes", required=True)
+    a.add_argument("--classes", default=None, help="NLCD-on-DEM raster (default mask)")
+    a.add_argument("--nwi", default=None, help="NWI GeoJSON; masks tidal types instead of NLCD")
+    a.add_argument("--dem", default=None, help="DEM to rasterize the NWI polygons onto")
     a.add_argument("--out-infil", required=True); a.add_argument("--out-infilcap", required=True)
 
     b = sub.add_parser("dem", help="remove lidar canopy bias from marsh elevations")
@@ -193,7 +211,10 @@ def main():
 
     v = ap.parse_args()
     if v.cmd == "infil":
-        mask_marsh_infiltration(v.infil, v.infilcap, v.classes, v.out_infil, v.out_infilcap)
+        if not (v.classes or v.nwi):
+            raise SystemExit("supply --classes or --nwi")
+        mask_marsh_infiltration(v.infil, v.infilcap, v.classes, v.out_infil, v.out_infilcap,
+                                nwi_geojson=v.nwi, dem_asc=v.dem)
     elif v.cmd == "dem":
         correct_marsh_dem(v.dem, v.classes, v.out, offset=v.offset, chm_asc=v.chm,
                           chm_fraction=v.chm_fraction, log_csv=v.log, max_drop=v.max_drop)
