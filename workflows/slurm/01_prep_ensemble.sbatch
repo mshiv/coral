@@ -18,10 +18,14 @@ set -uo pipefail
 export CORAL=/storage/home/hcoda1/6/smurugan9/data/dev/coral
 export PROJ=/storage/home/hcoda1/6/smurugan9/data/projects/coral
 export SCR=/storage/home/hcoda1/6/smurugan9/scratch/coral
-export BASE=$SCR/runs/compound30m
+# Base run the sweep copies its grids from. Overridable so a corrected-physics ensemble can be
+# built without touching the original: the scenario YAML names no grids, so the DEM, Manning and
+# infiltration fields all come from whatever base is passed here.
+export BASE=${3:-$SCR/runs/compound30m}
 
 SCENARIO=${1:-pinpoint_train30m}      # config name, without path or .yaml
 OUTNAME=${2:-train30m}                # directory under $SCR/runs
+                                      # $3 = base run dir (default compound30m)
 OUT=$SCR/runs/$OUTNAME
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
