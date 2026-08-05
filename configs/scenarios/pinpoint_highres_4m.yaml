@@ -38,7 +38,7 @@ interventions:
   focus_radius_km: 3.0           # tight around Pin Point, matching the validation ensemble
   seed: 7
   siting: targeted
-  flood_depth: ${PP4}/results_pinpoint_highres_4m/res_pinpoint_highres_4m.max
+  flood_depth: ${PP4}/results_full/res_pinpoint_highres_4m.max
   wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
   soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
   ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
