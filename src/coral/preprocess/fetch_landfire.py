@@ -52,11 +52,18 @@ def evh_code_to_m(codes):
     return out
 
 
-def fetch(bbox, out_zip, layer="240EVH"):
-    """Submit an LFPS job and download the result. bbox = (W, S, E, N) in WGS84."""
+def fetch(bbox, out_zip, layer="240EVH", email=None):
+    """Submit an LFPS job and download the result. bbox = (W, S, E, N) in WGS84.
+
+    LFPS requires an Email parameter; it is used to notify on completion and the request is
+    rejected without it (HTTP 400).
+    """
+    if not email:
+        raise SystemExit("LFPS requires --email")
     q = urllib.parse.urlencode({
         "Layer_List": layer,
-        "Area_of_Interest": " ".join(str(v) for v in bbox)})
+        "Area_of_Interest": " ".join(str(v) for v in bbox),
+        "Email": email})
     with urllib.request.urlopen(f"{LFPS}/job/submit?{q}", timeout=60) as r:
         job = json.load(r)
     jid = job.get("jobId") or job.get("JobId")
@@ -121,12 +128,13 @@ def main():
     f = s.add_parser("fetch")
     f.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "S", "E", "N"))
     f.add_argument("--out", required=True); f.add_argument("--layer", default="240EVH")
+    f.add_argument("--email", required=True, help="LFPS requires this; used for job notification")
     g = s.add_parser("grid")
     g.add_argument("--evh", required=True, help="EVH GeoTIFF (fetched or downloaded manually)")
     g.add_argument("--dem", required=True); g.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.cmd == "fetch":
-        fetch(a.bbox, a.out, a.layer)
+        fetch(a.bbox, a.out, a.layer, a.email)
     else:
         grid(a.evh, a.dem, a.out)
 
