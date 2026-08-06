@@ -5,19 +5,6 @@ assume a fixed cell size, so a model trained at 30 m cannot run at 4 m. A graph 
 assumption provided the edges carry physical scale.
 
 Edge features are length and elevation difference. Without them a message-passing hop has no
-physical meaning and the model cannot transfer between resolutions, which is the whole reason for
-the architecture. This is the load-bearing design decision in the module.
-
-Node features match the U-Net's per-cell channels (elevation, Manning's n, Ksat, storage) so the
-two are benchmarked on identical information. Scalar forcing is attached per node the same way.
-
-Boundary nodes carry the .bci/.bdy stage series. That is where surge and tide enter, and it is the
-part with no precedent in the flood-GNN literature: SWE-GNN and its successors are fluvial or
-pluvial.
-
-Subgraph sampling exists because a 30 m grid is 1.2 M nodes and about 4.8 M edges per sample, which
-does not fit in GPU memory. Samples are connected neighbourhoods, with boundary nodes oversampled
-since they carry the forcing.
 """
 from dataclasses import dataclass
 
@@ -40,7 +27,7 @@ def cell_size_m(header):
     """Cell size in metres. Degrees are converted at the grid's own latitude.
 
     LISFLOOD grids here are lon/lat, so a degree of longitude is shorter than a degree of
-    latitude and both shrink with latitude. Getting this wrong silently rescales every edge.
+    latitude and both shrink with latitude.
     """
     cs = header["cellsize"]
     if cs > 0.01:                       # already metres
@@ -53,8 +40,7 @@ def build_graph(dem, manning, ksat, awc, target, header, *, scalars=None,
                 boundary_mask=None, sea_level=0.81):
     """One raster stack -> FloodGraph. Nodes are cells that can hold water.
 
-    Permanently dry high ground is dropped: it never wets, contributes no flux, and inflating the
-    graph with it costs memory that subgraph sampling then has to work around.
+    Permanently dry high ground is dropped
     """
     nr, nc = dem.shape
     valid = np.isfinite(dem)
