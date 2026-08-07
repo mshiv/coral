@@ -11,6 +11,7 @@ All knobs come from the scenario config (coupling.*), not hardcoded.
 """
 from __future__ import annotations
 import os
+import pathlib
 import re
 import numpy as np
 
@@ -193,3 +194,89 @@ def from_config(cfg, output_dir, bci_in, bdy_out, bci_out, n_coupling=None,
                      datum_offset=cfg.coupling.datum_offset_m,
                      landfall_s=cfg.coupling.landfall_s,
                      tide=tide, surge_baseline=surge_baseline or 0.0)
+
+
+# ---------------------------------------------------------------- window extension
+def _coops(product, begin, end, station="8670870"):
+    """NOAA CO-OPS series. product is 'predictions' (astronomical tide) or 'water_level'."""
+    import json, urllib.request
+    from datetime import datetime, timezone
+    u = ("https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?"
+         f"product={product}&application=CORAL&begin_date={begin}&end_date={end}"
+         f"&datum=NAVD&station={station}&time_zone=gmt&units=metric&format=json")
+    d = json.load(urllib.request.urlopen(u, timeout=90))
+    rows = d["predictions"] if product == "predictions" else d["data"]
+    t = [datetime.strptime(r["t"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc) for r in rows]
+    v = [float(r["v"]) for r in rows if r["v"] not in ("", None)]
+    return np.array([x.timestamp() for x in t[:len(v)]]), np.array(v)
+
+
+def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc, station="8670870",
+                        begin=None, end=None):
+    """Extend every block to `t_end_s` using observed water level at a tide gauge.
+
+    GeoClaw is barotropic and stops at the end of its run, so the boundary returns to its static
+    datum. Observations do not: after Matthew the non-tidal residual stayed 20-58 cm above normal
+    until 14 October (PHAWL, Park et al. 2024), and the tide keeps running. Extending with a held
+    or decayed value would miss both.
+
+    Each block keeps its own offset from the gauge, measured at the splice time:
+
+        stage_i(t) = observed(t) + [stage_i(t_splice) - observed(t_splice)]
+
+    so the alongshore structure GeoClaw provides is preserved while the temporal behaviour comes
+    from the observation. The offset also means nothing is double counted: whatever the boundary
+    already held at the splice is carried forward, not added again.
+
+    t0_utc is model time zero as an ISO UTC string. begin/end default to a window around the
+    extension, in CO-OPS YYYYMMDD form.
+    """
+    from datetime import datetime, timedelta, timezone
+    t0 = datetime.fromisoformat(t0_utc).replace(tzinfo=timezone.utc)
+    lines = pathlib.Path(bdy_in).read_text().splitlines()
+
+    # splice time is the last sample of the first block
+    i = 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    n0 = int(lines[i + 1].split()[0])
+    t_splice = float(lines[i + 1 + n0].split()[1])
+    if t_end_s <= t_splice:
+        raise SystemExit(f"t_end_s {t_end_s} is not beyond the existing end {t_splice}")
+
+    # Order matters: superpose the tide first, then extend. The extension carries the full tidal
+    # swing from the observation, so a tide-free input would change character at the splice --
+    # continuous in value, but flat before and oscillating after.
+    _c = lines[i + 2:i + 2 + n0]
+    _v = np.array([float(r.split()[0]) for r in _c[-int(min(n0, 4000)):]])
+    if _v.size > 100 and (_v.max() - _v.min()) < 0.5:
+        print("  WARNING: the input boundary looks tide-free (last-day range "
+              f"{_v.max() - _v.min():.2f} m). Run build_bdy with tide= first, then extend.")
+
+    b = begin or (t0 + timedelta(seconds=t_splice - 86400)).strftime("%Y%m%d")
+    e = end or (t0 + timedelta(seconds=t_end_s + 86400)).strftime("%Y%m%d")
+    ot, ov = _coops("water_level", b, e, station)
+    om = np.array([(t0 + timedelta(seconds=float(s))).timestamp()
+                   for s in np.arange(t_splice, t_end_s + 1, 360.0)])
+    obs = np.interp(om, ot, ov)
+    new_secs = np.arange(t_splice, t_end_s + 1, 360.0)[1:]
+    obs_splice, obs_rest = obs[0], obs[1:]
+
+    out, i, nblk = [lines[0]], 1, 0
+    while i < len(lines):
+        name = lines[i].strip()
+        if not name:
+            i += 1; continue
+        parts = lines[i + 1].split()
+        n, unit = int(parts[0]), (parts[1] if len(parts) > 1 else "seconds")
+        rows = lines[i + 2:i + 2 + n]
+        last_v = float(rows[-1].split()[0])
+        off = last_v - obs_splice
+        rows = list(rows) + [f"{v + off:.4f}\t{s:.1f}" for v, s in zip(obs_rest, new_secs)]
+        out += [name, f"{len(rows)}\t\t{unit}"] + rows
+        i += 2 + n; nblk += 1
+
+    pathlib.Path(bdy_out).write_text("\n".join(out) + "\n")
+    print(f"extended {nblk} blocks from {t_splice:.0f} to {t_end_s:.0f} s using {station}; "
+          f"observed {obs_rest.min():.2f}-{obs_rest.max():.2f} m -> {bdy_out}")
+    return bdy_out
