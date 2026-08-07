@@ -221,7 +221,7 @@ def modulate_marsh_n(manning_asc, classes_asc, chm_asc, out_manning,
     print(f"marsh n modulated on {int(m.sum())} cells: {out[m].min():.3f}-{out[m].max():.3f} "
           f"(canopy {hgt[m].min():.2f}-{hgt[m].max():.2f} m on a "
           f"{'fixed ' + format(lo_h, '.1f') + '-' + format(hi_h, '.1f') if absolute else 'percentile'} m "
-          f"scale -> Arefin IQR {lo}-{hi}) -> {out_manning}")
+          f"scale -> n range {lo}-{hi}) -> {out_manning}")
     return out_manning
 
 
@@ -250,6 +250,10 @@ def main():
     c = sub.add_parser("manning", help="modulate marsh n by canopy height")
     c.add_argument("--manning", required=True); c.add_argument("--classes", required=True)
     c.add_argument("--chm", required=True); c.add_argument("--out", required=True)
+    c.add_argument("--n-lo", type=float, default=AREFIN_N_LO,
+                   help="low end of the marsh n range (default: Arefin saltmarsh IQR)")
+    c.add_argument("--n-hi", type=float, default=AREFIN_N_HI,
+                   help="high end of the marsh n range; widen for a roughness sensitivity run")
     c.add_argument("--percentile", action="store_true",
                    help="rescale by this raster's own 5-95 percentile instead of the fixed "
                         "0.2-1.4 m scale; not comparable across resolutions")
@@ -264,7 +268,8 @@ def main():
         correct_marsh_dem(v.dem, v.classes, v.out, offset=v.offset, chm_asc=v.chm,
                           chm_fraction=v.chm_fraction, log_csv=v.log, max_drop=v.max_drop)
     else:
-        modulate_marsh_n(v.manning, v.classes, v.chm, v.out, absolute=not v.percentile)
+        modulate_marsh_n(v.manning, v.classes, v.chm, v.out, lo=v.n_lo, hi=v.n_hi,
+                         absolute=not v.percentile)
 
 
 if __name__ == "__main__":
