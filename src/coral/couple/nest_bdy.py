@@ -47,6 +47,13 @@ def _coarse_wse_series(coarse_dir, root, dry_thresh=0.05, results=None):
                 + ". Pass --results to say which parent to nest from.")
         res = cands[0] if cands else d
     wds = sorted(res.glob(f"{root}-*.wd"))
+    if not wds:
+        have = sorted({p.name.split("-")[0] for p in res.glob("*.wd")})
+        raise SystemExit(
+            f"no '{root}-*.wd' snapshots in {res}. "
+            + (f"That directory holds output for {have} -- pass --root." if have
+               else "That directory has no .wd output at all: the run has not produced "
+                    "snapshots yet, or it failed before the first saveint."))
     stack = []
     for p in wds:
         depth, _ = read_asc(p)
