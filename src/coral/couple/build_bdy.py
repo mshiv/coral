@@ -268,22 +268,18 @@ def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc=MODEL_T0_UTC, statio
     b = begin or (t0 + timedelta(seconds=t_splice - 86400)).strftime("%Y%m%d")
     e = end or (t0 + timedelta(seconds=t_end_s + 86400)).strftime("%Y%m%d")
     ot, ov = _coops("water_level", b, e, station)
-    om = np.array([(t0 + timedelta(seconds=float(s))).timestamp()
-                   for s in np.arange(t_splice, t_end_s + 1, 360.0)])
-    obs = np.interp(om, ot, ov)
-    new_secs = np.arange(t_splice, t_end_s + 1, 360.0)[1:]
-    obs_rest = obs[1:]
 
-    # Offset is a MEAN over the last tidal cycle, not the value at the splice instant. A single
-    # sample sits at some tidal phase, so an instantaneous offset absorbs the tide instead of the
-    # spatial difference between the boundary point and the gauge, and biases the whole extension.
-    # One M2 cycle is 12.42 h.
+    def _obs_at(secs):
+        """Observed level interpolated onto model seconds."""
+        return np.interp(np.array([(t0 + timedelta(seconds=float(s))).timestamp() for s in secs]),
+                         ot, ov)
+
+    # One M2 cycle. The offset is a MEAN over the last cycle, not the value at the splice instant:
+    # a single sample sits at some tidal phase, so an instantaneous offset absorbs the tide instead
+    # of the spatial difference between the boundary point and the gauge, and biases the extension.
     cyc = 12.42 * 3600.0
-    ct = np.array([(t0 + timedelta(seconds=float(s))).timestamp()
-                   for s in np.arange(t_splice - cyc, t_splice, 360.0)])
-    obs_cycle_mean = float(np.mean(np.interp(ct, ot, ov)))
 
-    out, i, nblk = [lines[0]], 1, 0
+    out, i, nblk, skipped = [lines[0]], 1, 0, 0
     while i < len(lines):
         name = lines[i].strip()
         if not name:
@@ -293,12 +289,31 @@ def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc=MODEL_T0_UTC, statio
         rows = lines[i + 2:i + 2 + n]
         rv = np.array([float(r.split()[0]) for r in rows])
         rt = np.array([float(r.split()[1]) for r in rows])
-        sel = rv[rt >= t_splice - cyc]
+
+        # Splice each block at its OWN last sample. GeoClaw writes one gauge series per block on
+        # the solver's timesteps, so block end times differ. Splicing every block at the first
+        # block's end appends rows that predate the last sample of any longer block, and LISFLOOD
+        # rejects the file with "times should be in increasing order".
+        tb = float(rt[-1])
+        new_secs = np.arange(tb, t_end_s + 1, 360.0)[1:]
+        if new_secs.size == 0:
+            out += [name, f"{n}\t\t{unit}"] + list(rows)
+            i += 2 + n; nblk += 1; skipped += 1
+            continue
+
+        obs_cycle_mean = float(np.mean(_obs_at(np.arange(tb - cyc, tb, 360.0))))
+        sel = rv[rt >= tb - cyc]
         bdy_cycle_mean = float(sel.mean()) if sel.size else float(rv[-1])
         off = bdy_cycle_mean - obs_cycle_mean
-        rows = list(rows) + [f"{v + off:.4f}\t{s:.1f}" for v, s in zip(obs_rest, new_secs)]
+
+        rows = list(rows) + [f"{v + off:.4f}\t{s:.1f}"
+                             for v, s in zip(_obs_at(new_secs), new_secs)]
         out += [name, f"{len(rows)}\t\t{unit}"] + rows
         i += 2 + n; nblk += 1
+
+    if skipped:
+        print(f"  {skipped} of {nblk} blocks already reached {t_end_s:.0f} s and were left as-is")
+    obs_rest = _obs_at(np.arange(t_splice, t_end_s + 1, 360.0)[1:])
 
     pathlib.Path(bdy_out).write_text("\n".join(out) + "\n")
     print(f"extended {nblk} blocks from {t_splice:.0f} to {t_end_s:.0f} s using {station}; "
