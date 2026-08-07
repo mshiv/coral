@@ -158,9 +158,16 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
     for spec in specs:
         run = out_root / spec["name"]; run.mkdir(exist_ok=True)
         dem, man, ksat, awc = dem0.copy(), man0.copy(), ksat0.copy(), awc0.copy()
+        # Site against the water level this member actually experiences, not the present-day one.
+        # Every intervention is placed relative to the waterline: the shoreline contour a wall
+        # follows, the intertidal band marsh occupies, the land/water split in suitability_mask.
+        # Using the base sea level for all members put a High2100 wall (+2.04 m) against a
+        # coastline that run never has, and pinned marsh to the present-day intertidal zone
+        # instead of letting it migrate inland as the sea rises.
+        member_sea_level = sea_level + float(spec.get("slr_m", 0.0))
         for kb in spec["interventions"]:
             dem, man, ksat, awc, _ = apply_intervention(kb, dem, man, ksat, awc,
-                                                        sea_level=sea_level,
+                                                        sea_level=member_sea_level,
                                                         classes=classes, focus=focus,
                                                         wetlands=wetlands, soil_ksat=soil_ksat,
                                                         buildings=buildings, place=place,
