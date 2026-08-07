@@ -40,6 +40,53 @@ def check_par(par_path):
                 f = Path(par_path).parent / p[1]
                 if not f.exists():
                     problems.append(f"{ref} -> {p[1]} does not exist")
+                elif ref == "bdyfile":
+                    problems += check_bdy(f)
+    return problems
+
+
+def check_bdy(bdy_path):
+    """Return problem strings for a .bdy, reading it the way LISFLOOD does.
+
+    `LoadTimeSeries` (input.cpp:1819) consumes exactly `count` rows after each block header,
+    skipping only comment lines, and rejects any time <= the previous one. The previous time
+    starts at -1 s, so a block whose first sample is negative fails on its first row. A gauge
+    record placed on the model clock routinely starts before model time zero, and the run then
+    exits before the first timestep with no output directory to inspect.
+    """
+    problems = []
+    lines = Path(bdy_path).read_text().splitlines()
+    name, i = Path(bdy_path).name, 1          # line 0 is the file comment
+    while i < len(lines):
+        block = lines[i].strip(); i += 1
+        if not block:
+            continue
+        while i < len(lines) and (not lines[i].strip() or lines[i].startswith("#")):
+            i += 1
+        if i >= len(lines):
+            problems.append(f"{name}: block '{block}' has no header"); break
+        try:
+            n = int(lines[i].split()[0])
+        except (ValueError, IndexError):
+            problems.append(f"{name}: block '{block}' header unreadable: {lines[i]!r}"); break
+        i += 1
+        prev = -1.0
+        for k in range(n):
+            if i >= len(lines):
+                problems.append(f"{name}: block '{block}' ends {n - k} rows short of its count")
+                return problems
+            tok = lines[i].split(); i += 1
+            if len(tok) < 2:
+                problems.append(f"{name}: block '{block}' row {k} has {len(tok)} token(s): "
+                                f"{lines[i - 1]!r}")
+                return problems
+            t = float(tok[1])
+            if t <= prev:
+                why = ("first sample predates model time zero" if k == 0
+                       else "times not strictly increasing")
+                problems.append(f"{name}: block '{block}' row {k}: t={t} <= {prev} ({why})")
+                return problems
+            prev = t
     return problems
 
 
