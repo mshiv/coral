@@ -20,15 +20,32 @@ import numpy as np
 from ..emulator.dataset import read_asc
 
 
-def _coarse_wse_series(coarse_dir, root, dry_thresh=0.05):
+def _coarse_wse_series(coarse_dir, root, dry_thresh=0.05, results=None):
     """Return (dem, x, y, times, wse_stack) for the coarse run. wse = dem+depth where
-    wet, nan where dry; wse_stack is [T, ny, nx]."""
+    wet, nan where dry; wse_stack is [T, ny, nx].
+
+    `results` names the results subdirectory. One run directory can hold several, since a
+    par file sets `dirroot` and reruns with different forcing write alongside each other.
+    Picking one by name would silently nest a clip on the wrong parent, so when the choice
+    is ambiguous this raises instead of guessing.
+    """
     d = Path(coarse_dir)
     dem, h = read_asc(next(d.glob("SUB_DEM*.asc")))
     ny, nx = dem.shape; cs = h["cellsize"]
     x = h["xllcorner"] + (np.arange(nx) + .5) * cs
     y = (h["yllcorner"] + ny * cs) - (np.arange(ny) + .5) * cs
-    res = d / "results_matthew_sav" if (d / "results_matthew_sav").exists() else d
+    if results:
+        res = d / results
+        if not res.is_dir():
+            raise SystemExit(f"no results directory {res}")
+    else:
+        cands = sorted(p for p in d.glob("results*") if p.is_dir() and any(p.glob(f"{root}-*.wd")))
+        if len(cands) > 1:
+            raise SystemExit(
+                f"{d} holds {len(cands)} results directories with '{root}' output: "
+                + ", ".join(p.name for p in cands)
+                + ". Pass --results to say which parent to nest from.")
+        res = cands[0] if cands else d
     wds = sorted(res.glob(f"{root}-*.wd"))
     stack = []
     for p in wds:
@@ -55,7 +72,7 @@ def _fill_holding(series):
     return v[idx]
 
 
-def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
+def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav", results=None,
              saveint=1800.0, t0=86400.0, spacing_m=30.0, dry_thresh=0.05,
              wet_frac=0.25, inset_deg=1e-5, edges="SEWN"):
     """Build the clip's .bci + .bdy from the coarse run. clip_bbox=[W,E,S,N].
@@ -65,7 +82,7 @@ def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
     Points are inset from the exact bbox edge by `inset_deg` (about half a clip cell) so
     they land on the outermost valid clip cells. A point on the exact perimeter maps to a
     cell index of -1 or n in the high-res clip and makes LISFLOOD segfault."""
-    dem, x, y, wse = _coarse_wse_series(coarse_dir, root, dry_thresh)
+    dem, x, y, wse = _coarse_wse_series(coarse_dir, root, dry_thresh, results)
     T = wse.shape[0]
     W, E, S, N = clip_bbox
     Wi, Ei, Si, Ni = W + inset_deg, E - inset_deg, S + inset_deg, N - inset_deg
@@ -130,7 +147,7 @@ def nest_bdy(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
     return {"points": len(kept), "timesteps": T, "bci": out_bci, "bdy": out_bdy}
 
 
-def nest_bdy_edges(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav",
+def nest_bdy_edges(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew_sav", results=None,
                    saveint=1800.0, t0=86400.0, seg_m=120.0, dry_thresh=0.05,
                    wet_frac=0.25, edges="SEWN"):
     """Nest a clip boundary as LISFLOOD EDGE conditions rather than point sources.
@@ -163,7 +180,7 @@ def nest_bdy_edges(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew
     variation is preserved. Segments that are dry in the parent are omitted, leaving that
     stretch closed (LISFLOOD's default for an edge with no .bci entry).
     """
-    dem, x, y, wse = _coarse_wse_series(coarse_dir, root, dry_thresh)
+    dem, x, y, wse = _coarse_wse_series(coarse_dir, root, dry_thresh, results)
     T = wse.shape[0]
     W, E, S, N = clip_bbox
     step = seg_m / 111000.0
@@ -224,16 +241,20 @@ if __name__ == "__main__" and not any(
                          "instead of P point sources (which hard-set cell depth). Use this "
                          "when the clip boundary is the domain edge.")
     ap.add_argument("--seg", type=float, default=120.0, help="edge segment length in metres")
+    ap.add_argument("--results", default=None,
+                    help="results subdirectory of --coarse to nest from, e.g. results_fullforcing. "
+                         "Required when the run directory holds more than one.")
     ap.add_argument("--edges", default="SEWN",
                     help="which clip edges get a prescribed stage, e.g. 'SE'. The rest stay "
                          "closed. Prescribing all four (the default, kept for compatibility) "
                          "pins the interior on every side and accumulates mass error.")
     a = ap.parse_args()
     if a.edge_bc:
-        nest_bdy_edges(a.coarse, a.bbox, a.out_bci, a.out_bdy, seg_m=a.seg, edges=a.edges)
+        nest_bdy_edges(a.coarse, a.bbox, a.out_bci, a.out_bdy, seg_m=a.seg, edges=a.edges,
+                       results=a.results)
     else:
         nest_bdy(a.coarse, a.bbox, a.out_bci, a.out_bdy,
-                 spacing_m=a.spacing, edges=a.edges)
+                 spacing_m=a.spacing, edges=a.edges, results=a.results)
 
 
 def snap_bci_to_grid(bci_in, dem_asc, bci_out=None):

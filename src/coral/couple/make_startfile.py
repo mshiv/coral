@@ -52,7 +52,7 @@ def _write_asc(path, arr, h, nodata):
         np.savetxt(f, arr, fmt="%.4f")
 
 
-def make_startfile(coarse_dir, fine_dem, out, tstart, root="res_matthew_sav",
+def make_startfile(coarse_dir, fine_dem, out, tstart, root="res_matthew_sav", results=None,
                    saveint=1800.0, t0=86400.0, dry_thresh=0.05, nodata=-9999.0, level=None):
     """If `level` is given, prime to that still-water elevation instead of the parent's field.
 
@@ -75,7 +75,7 @@ def make_startfile(coarse_dir, fine_dem, out, tstart, root="res_matthew_sav",
             print("  WARNING: almost nothing is wet. Edge boundaries will not engage (sgc.cpp:1354).")
         return out
 
-    dem, cx, cy, wse = _coarse_wse_series(coarse_dir, root, dry_thresh)
+    dem, cx, cy, wse = _coarse_wse_series(coarse_dir, root, dry_thresh, results)
     times = t0 + np.arange(wse.shape[0]) * saveint
     # Nearest snapshot at or before tstart. Before the series begins, hold the first frame:
     # the series starts a day ahead of landfall at undisturbed tidal stage, so the earliest
@@ -113,12 +113,16 @@ def main():
     ap.add_argument("--coarse", required=True); ap.add_argument("--fine-dem", required=True)
     ap.add_argument("--out", required=True); ap.add_argument("--tstart", type=float, required=True)
     ap.add_argument("--root", default="res_matthew_sav")
+    ap.add_argument("--results", default=None,
+                    help="results subdirectory of --coarse to prime from. Must match the one the "
+                         "boundary was nested from.")
     ap.add_argument("--level", type=float, default=None,
                     help="still-water elevation (m) to prime to, instead of sampling the "
                          "parent. Use when the run starts before the parent's series, where "
                          "the earliest snapshot is pre-storm and the clip is dry in it.")
     a = ap.parse_args()
-    make_startfile(a.coarse, a.fine_dem, a.out, a.tstart, root=a.root, level=a.level)
+    make_startfile(a.coarse, a.fine_dem, a.out, a.tstart, root=a.root,
+                   results=a.results, level=a.level)
 
 
 if __name__ == "__main__":
