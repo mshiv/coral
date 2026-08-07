@@ -32,8 +32,14 @@ forcing:
 interventions:
   kinds: [marsh, living_shoreline, seawall, depave, retreat]
   slr_levels: [0.0]
-  slr_scenarios: [["Int", 2050], ["Int", 2070], ["Int", 2100], ["IntHigh", 2100], ["High", 2100]]
-  n_per_kind: 25                 # 6 SLR levels x (1 baseline + 5 kinds x 25) = 756 runs
+  slr_scenarios: [["Low", 2050], ["IntLow", 2050], ["Int", 2050], ["IntHigh", 2050], ["High", 2050], ["Int", 2100], ["High", 2100]]
+  #  Two jobs, one axis. The five 2050 scenarios are the DECISION horizon and are where results
+  #  are reported, so they are sampled densely. Int and High 2100 extend the range so those
+  #  reporting values sit interior: a network trained only on 0.22-0.42 m would have to
+  #  extrapolate for any later horizon, which is not defensible, and it would break the tool's
+  #  premise that any sea level is free to evaluate. 2070 is omitted -- it lies between the
+  #  cluster and the range and adds nothing.
+  n_per_kind: 25                 # 8 SLR levels x (1 baseline + 5 kinds x 25) = 1008 runs
   include_combos: false
   focus_radius_km: 3.0           # tight around Pin Point, matching the validation ensemble
   seed: 7
