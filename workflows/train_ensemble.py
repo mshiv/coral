@@ -112,9 +112,29 @@ def slr_key(sample):
     return lab if lab else f"{float(sample.forcing.get('slr_m', 0.0)):g}"
 
 
-def split(samples, holdout_slr=(), holdout_kind=(), holdout_frac=0.0, seed=0):
+def realisation_index(name):
+    """Trailing realisation number in a member name, e.g. slr0.0_marsh17 -> 17. None for baselines."""
+    import re
+    m = re.search(r"(\d+)$", name)
+    return int(m.group(1)) if m else None
+
+
+def split(samples, holdout_slr=(), holdout_kind=(), holdout_frac=0.0, seed=0,
+          holdout_realisation=None):
     """Return (train, val) plus a description of how the split was made."""
     import numpy as np
+    if holdout_realisation is not None:
+        # Withhold high realisation indices across every kind and sea level. This tests unseen
+        # PLACEMENTS of known intervention types, which is what a user does in the tool: draw a
+        # wall somewhere the model has not seen. Holding out a sea level tests forcing
+        # interpolation instead, and holding out a kind tests an unseen intervention type; the
+        # three answer different questions and are reported separately.
+        te = [s_ for s_ in samples
+              if (realisation_index(s_.name) or -1) >= holdout_realisation]
+        tr = [s_ for s_ in samples if s_ not in te]
+        how = (f"held out realisations >= {holdout_realisation} across all kinds and sea levels "
+               f"({len(te)} members): unseen placements of known types")
+        return tr, te, how
     if holdout_slr or holdout_kind:
         hs, hk = set(holdout_slr), set(holdout_kind)
         held = {id(s) for s in samples if slr_key(s) in hs or kind_of(s.name) in hk}
@@ -184,6 +204,9 @@ def main(argv=None):
     ap.add_argument("--subsample-per-kind", type=int, nargs="+", default=None,
                     help="train once per value, keeping that many realisations per kind, to "
                          "trace the learning curve against ensemble size")
+    ap.add_argument("--holdout-realisation", type=int, default=None,
+                    help="withhold realisation indices >= N across all kinds and sea levels; "
+                         "tests unseen placements of known intervention types")
     ap.add_argument("--arch", choices=["unet", "gnn"], default="unet")
     ap.add_argument("--bci", default=None,
                     help="gnn: .bci marking boundary nodes, where surge and tide enter")
