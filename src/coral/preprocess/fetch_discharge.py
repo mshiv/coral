@@ -18,6 +18,8 @@ duration.
 import argparse
 import json
 import urllib.request
+
+import numpy as np
 from datetime import datetime, timezone
 
 CFS_TO_CMS = 0.0283168
@@ -48,10 +50,29 @@ def fetch(site, start, end, param="00060"):
 
 
 def to_model_clock(times, values, t0_utc, width_m, tstart_s=0.0):
-    """Convert to (model_seconds, q_m2s). `t0_utc` is model time zero."""
+    """Convert to (model_seconds, q_m2s). `t0_utc` is model time zero.
+
+    Samples before t=0 are dropped, with one interpolated sample placed at t=0 so the
+    series still covers the run start. LISFLOOD initialises the previous time to -1 s
+    (`input.cpp:1860`), so a block whose first sample is negative fails the monotonic
+    check on its first row and the run exits before the first timestep. A gauge record
+    fetched around an event routinely starts before model time zero.
+    """
     t0 = datetime.fromisoformat(t0_utc).replace(tzinfo=timezone.utc)
     secs = [(t - t0).total_seconds() + tstart_s for t in times]
     q = [v * CFS_TO_CMS / width_m for v in values]
+
+    if secs and secs[0] < 0.0:
+        # Drop everything at or before t=0 and prepend a single interpolated sample there, so the
+        # series starts exactly at 0 and stays strictly increasing even when a sample lands on 0.
+        n_drop = sum(1 for s in secs if s <= 0.0)
+        if n_drop == len(secs):
+            raise SystemExit("the whole discharge record predates model time zero; "
+                             "check --t0 and the fetch window")
+        q0 = float(np.interp(0.0, secs, q))
+        secs, q = [0.0] + secs[n_drop:], [q0] + q[n_drop:]
+        print(f"  dropped {n_drop} samples at or before t=0, "
+              f"interpolated q={q0:.6f} m2/s at t=0")
     return secs, q
 
 
