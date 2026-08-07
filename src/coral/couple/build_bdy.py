@@ -319,3 +319,51 @@ def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc=MODEL_T0_UTC, statio
     print(f"extended {nblk} blocks from {t_splice:.0f} to {t_end_s:.0f} s using {station}; "
           f"observed {obs_rest.min():.2f}-{obs_rest.max():.2f} m -> {bdy_out}")
     return bdy_out
+
+
+def trim_bdy_to_zero(bdy_in, bdy_out=None):
+    """Drop samples at or before t=0 from every block, interpolating one sample at t=0.
+
+    LISFLOOD sets the previous time to -1 s before reading a block (`input.cpp:1860`), so a
+    block whose first sample is negative fails the monotonic check on its first row and the
+    run exits before the first timestep. Gauge records placed on the model clock routinely
+    start before model time zero.
+
+    Values before t=0 are outside the simulated window, so trimming loses nothing. The
+    interpolated sample keeps the series covering the run start.
+    """
+    lines = pathlib.Path(bdy_in).read_text().splitlines()
+    out, i, changed = [lines[0]], 1, []
+    while i < len(lines):
+        name = lines[i].strip()
+        if not name:
+            i += 1; continue
+        parts = lines[i + 1].split()
+        n, unit = int(parts[0]), (parts[1] if len(parts) > 1 else "seconds")
+        rows = lines[i + 2:i + 2 + n]
+        t = np.array([float(r.split()[1]) for r in rows])
+        if t[0] < 0.0:
+            v = np.array([float(r.split()[0]) for r in rows])
+            keep = int((t <= 0.0).sum())
+            if keep == len(t):
+                raise SystemExit(f"block '{name}' lies entirely at or before t=0")
+            v0 = float(np.interp(0.0, t, v))
+            rows = [f"{v0:.6f}\t0.0\t"] + rows[keep:]
+            changed.append((name, keep, t[0]))
+        out += [name, f"{len(rows)}\t\t{unit}"] + list(rows)
+        i += 2 + n
+    dest = bdy_out or bdy_in
+    pathlib.Path(dest).write_text("\n".join(out) + "\n")
+    for name, k, t0 in changed:
+        print(f"  block {name!r}: dropped {k} samples, first was t={t0:.1f} s")
+    print(f"trimmed {len(changed)} block(s) to start at t=0 -> {dest}")
+    return dest
+
+
+if __name__ == "__main__" and "--trim-bdy" in __import__("sys").argv:
+    import argparse
+    ap = argparse.ArgumentParser(description="Drop .bdy samples at or before t=0")
+    ap.add_argument("--trim-bdy", required=True)
+    ap.add_argument("--out", default=None, help="default: edit in place")
+    a = ap.parse_args()
+    trim_bdy_to_zero(a.trim_bdy, a.out)
