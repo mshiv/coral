@@ -209,7 +209,10 @@ def nest_bdy_edges(coarse_dir, clip_bbox, out_bci, out_bdy, *, root="res_matthew
     return {"segments": len(blocks), "timesteps": T, "bci": out_bci, "bdy": out_bdy}
 
 
-if __name__ == "__main__":
+_SUBMODES = ("--clamp-bdy", "--extend-bdy", "--snap-bci")
+
+if __name__ == "__main__" and not any(
+        f in __import__("sys").argv for f in _SUBMODES):
     import argparse
     ap = argparse.ArgumentParser(description="Nest a high-res clip boundary from a coarse run")
     ap.add_argument("--coarse", required=True, help="coarse run dir (DEM + results)")
