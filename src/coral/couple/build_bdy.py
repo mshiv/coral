@@ -15,6 +15,18 @@ import pathlib
 import re
 import numpy as np
 
+# Model time zero for the Matthew runs, UTC.
+#
+# The LISFLOOD clock is shifted relative to GeoClaw's, so neither the scenario's landfall_utc
+# (2016-10-08T06:00, GeoClaw t=0) nor the par's tstart gives it directly. This value was measured:
+# cross-correlating the GeoClaw boundary surge against the observed non-tidal residual at Fort
+# Pulaski (8670870) peaks at r = 0.885 for this epoch, putting the modelled surge maximum at
+# 2016-10-08 06:55 UTC.
+#
+# Anything converting between model seconds and real time needs it: tide superposition, boundary
+# extension, river hydrographs, and any comparison against observations.
+MODEL_T0_UTC = "2016-10-06T13:00:00"
+
 
 def _coupling_ids_from_bci(bci_in):
     """The .bci is the authoritative list of boundary points: return the gauge
@@ -211,7 +223,7 @@ def _coops(product, begin, end, station="8670870"):
     return np.array([x.timestamp() for x in t[:len(v)]]), np.array(v)
 
 
-def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc, station="8670870",
+def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc=MODEL_T0_UTC, station="8670870",
                         begin=None, end=None):
     """Extend every block to `t_end_s` using observed water level at a tide gauge.
 
