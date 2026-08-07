@@ -79,6 +79,67 @@ def _read_dem(dem_asc):
     return np.loadtxt(dem_asc, skiprows=6), h
 
 
+def build_dem(laz_dir, bbox, cellsize, out, nodata=-9999.0, dem_epsg=4326, floor=None):
+    """Bare-earth DEM from lidar ground returns, on a lon/lat grid.
+
+    Minimum z among ASPRS class 2 per cell. Cells with no ground return are filled from their
+    neighbours by nearest-value dilation, then any remainder is nodata.
+
+    Use when a clipped DEM at the wanted resolution does not exist. Ground classification comes
+    from the vendor, so the same Spartina penetration caveat applies as for the canopy model, and
+    the marsh correction in preprocess.marsh_corrections is still needed.
+
+    bbox is (W, S, E, N) in degrees; cellsize in degrees.
+    """
+    try:
+        import laspy
+    except ImportError:
+        raise SystemExit("needs laspy: pip install 'laspy[lazrs]' pyproj")
+    from pyproj import Transformer
+    from scipy import ndimage
+
+    W, S, E, N = bbox
+    nx = int(round((E - W) / cellsize)); ny = int(round((N - S) / cellsize))
+    gmin = np.full((ny, nx), np.inf)
+    files = sorted(glob.glob(os.path.join(laz_dir, "*.la[sz]")))
+    if not files:
+        raise SystemExit(f"no .las/.laz in {laz_dir}")
+    for k, f in enumerate(files, 1):
+        with laspy.open(f) as fh:
+            tr = Transformer.from_crs(fh.header.parse_crs(), f"EPSG:{dem_epsg}", always_xy=True)
+            for pts in fh.chunk_iterator(5_000_000):
+                cl = np.asarray(pts.classification)
+                g = cl == GROUND_CLASS
+                if not g.any():
+                    continue
+                lon, lat = tr.transform(np.asarray(pts.x)[g], np.asarray(pts.y)[g])
+                z = np.asarray(pts.z)[g]
+                col = ((lon - W) / cellsize).astype(int)
+                row = ((N - lat) / cellsize).astype(int)
+                ok = (col >= 0) & (col < nx) & (row >= 0) & (row < ny) & np.isfinite(z)
+                if ok.any():
+                    np.minimum.at(gmin, (row[ok], col[ok]), z[ok])
+        print(f"  [{k}/{len(files)}] {os.path.basename(f)}")
+
+    have = np.isfinite(gmin)
+    print(f"  ground returns in {100*have.mean():.1f}% of cells")
+    if not have.all():
+        idx = ndimage.distance_transform_edt(~have, return_distances=False, return_indices=True)
+        gmin = gmin[tuple(idx)]
+    dem = np.where(np.isfinite(gmin), gmin, nodata)
+    if floor is not None:
+        dem = np.where(dem > nodata, np.maximum(dem, floor), dem)
+    with open(out, "w") as f:
+        f.write(f"ncols        {nx}\nnrows        {ny}\n"
+                f"xllcorner    {W:.12f}\nyllcorner    {S:.12f}\n"
+                f"cellsize     {cellsize:.12f}\nNODATA_value {nodata:.0f}\n")
+        np.savetxt(f, dem, fmt="%.3f")
+    v = dem[dem > nodata]
+    print(f"DEM -> {out}: {nx}x{ny}, {v.min():.2f} to {v.max():.2f} m, median {np.median(v):.2f}"
+          + (f", {100*np.mean(v <= floor):.1f}% at the {floor} m floor" if floor is not None else ""))
+    return out
+
+
 def build(laz_dir, dem_asc, out, nodata=-9999.0, dem_epsg=4326):
     try:
         import laspy
@@ -152,6 +213,12 @@ def main():
         p.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "S", "E", "N"))
         if name == "fetch":
             p.add_argument("--out-dir", required=True)
+    e = s.add_parser("dem", help="bare-earth DEM from lidar ground returns")
+    e.add_argument("--laz-dir", required=True)
+    e.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "S", "E", "N"))
+    e.add_argument("--cellsize", type=float, required=True, help="degrees")
+    e.add_argument("--floor", type=float, default=None)
+    e.add_argument("--out", required=True)
     b = s.add_parser("build")
     b.add_argument("--laz-dir", required=True); b.add_argument("--dem", required=True)
     b.add_argument("--out", required=True)
@@ -160,6 +227,8 @@ def main():
         list_tiles(a.bbox)
     elif a.cmd == "fetch":
         fetch(a.bbox, a.out_dir)
+    elif a.cmd == "dem":
+        build_dem(a.laz_dir, a.bbox, a.cellsize, a.out, floor=a.floor)
     else:
         build(a.laz_dir, a.dem, a.out)
 
