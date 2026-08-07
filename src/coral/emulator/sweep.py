@@ -155,7 +155,7 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         write_ascii(str(dest), arr, str(dem_p)); return True
 
     manifest = []
-    for spec in specs:
+    for _mi, spec in enumerate(specs):
         run = out_root / spec["name"]; run.mkdir(exist_ok=True)
         dem, man, ksat, awc = dem0.copy(), man0.copy(), ksat0.copy(), awc0.copy()
         # Site against the water level this member actually experiences, not the present-day one.
@@ -165,7 +165,10 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         # coastline that run never has, and pinned marsh to the present-day intertidal zone
         # instead of letting it migrate inland as the sea rises.
         member_sea_level = sea_level + float(spec.get("slr_m", 0.0))
+        # Member index, so floodwall alignments are drawn without replacement: N members get N
+        # distinct alignments instead of N independent draws that can repeat.
         for kb in spec["interventions"]:
+            kb.setdefault("alignment_index", _mi)
             dem, man, ksat, awc, _ = apply_intervention(kb, dem, man, ksat, awc,
                                                         sea_level=member_sea_level,
                                                         classes=classes, focus=focus,

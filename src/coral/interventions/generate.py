@@ -518,11 +518,24 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
         if knobs.get("seawall_line", True):
             # Eligible shoreline: buildings if available, else the focus region. Without one of
             # these the wall lands on whichever islet has the longest outline.
-            near = buildings if buildings is not None else focus
-            m = seawall_line_mask(dem, dem.shape, crest_m=knobs["crest_m"],
-                                  length_m=knobs.get("length_m", 600.0), res_m=res_m,
-                                  sea_level=sea_level, near_mask=near,
-                                  rng=np.random.default_rng(knobs.get("seed", 0)))
+            # Terrain siting by default; assets only for the targeted decision set.
+            near = buildings if (place == "targeted" and buildings is not None) else None
+            # About half of candidate alignments have no tie-in within reach and return an empty
+            # mask. Retry with the next alignment so the ensemble fills; without this a member
+            # would silently run with no intervention at all.
+            base_idx = knobs.get("alignment_index", knobs.get("seed", 0))
+            m = np.zeros(dem.shape, dtype=bool)
+            for attempt in range(12):
+                m = seawall_line_mask(dem, dem.shape, crest_m=knobs["crest_m"],
+                                      length_m=knobs.get("length_m", 600.0), res_m=res_m,
+                                      sea_level=sea_level, near_mask=near,
+                                      alignment_index=base_idx + attempt,
+                                      rng=np.random.default_rng(knobs.get("seed", 0) + attempt))
+                if m.any():
+                    break
+            if not m.any():
+                print(f"  no tie-in alignment found after 12 attempts (seed "
+                      f"{knobs.get('seed')}); member has no floodwall")
         else:
             m = place_mask("seawall")                     # legacy near-shore band
         dem[m] = np.maximum(dem[m], knobs["crest_m"])
