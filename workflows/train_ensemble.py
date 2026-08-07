@@ -11,11 +11,9 @@ Steps:
 
   1. Reads manifest.json from every `--ensemble` directory.
   2. Reports coverage: how many members were planned, how many have a `.max`, and why the
-     rest do not. 
-  3. Splits. The default holds out whole sea-level levels, not random members, because the
-     question is whether the emulator generalises to a sea level it never saw, and random
-     splitting leaks: 250 members share each level, so a random 20% leaves near-duplicates
-     of every held-out case in training. `--val-ensemble` instead validates on a separate
+     rest do not.
+  3. Splits. The default holds out whole sea-level levels,
+    `--val-ensemble` instead validates on a separate
      ensemble, which is the stronger test when that ensemble uses targeted siting while
      training used random placement.
   4. Trains the U-Net (`--arch unet`) or the GraphSAGE GNN (`--arch gnn`), early stopping
@@ -37,7 +35,9 @@ Usage:
     python workflows/train_ensemble.py --ensemble $SCR/runs/train30m \
         --holdout-slr Int2070 --subsample-per-kind 10 25 50
 
-Deps: torch (pip install -e ".[emulator]"); torch_geometric only for --arch gnn.
+Deps: torch (pip install -e ".[emulator]"). The GNN uses scatter-add over an edge list (torch_geometric can be used later if necessary),
+so both architectures run in the same environment and the benchmark is not
+confounded by library differences.
 """
 from __future__ import annotations
 import argparse
@@ -185,6 +185,13 @@ def main(argv=None):
                     help="train once per value, keeping that many realisations per kind, to "
                          "trace the learning curve against ensemble size")
     ap.add_argument("--arch", choices=["unet", "gnn"], default="unet")
+    ap.add_argument("--bci", default=None,
+                    help="gnn: .bci marking boundary nodes, where surge and tide enter")
+    ap.add_argument("--hidden", type=int, default=64, help="gnn: hidden width")
+    ap.add_argument("--layers", type=int, default=8,
+                    help="gnn: message-passing layers, i.e. how many cells information travels")
+    ap.add_argument("--sub-nodes", type=int, default=60000,
+                    help="gnn: nodes per sampled subgraph; the memory knob")
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--base", type=int, default=32, help="U-Net width")
@@ -238,14 +245,6 @@ def main(argv=None):
     if val:
         print(f"  sea levels held out: {sorted({slr_key(s) for s in val})}")
 
-    if a.arch == "gnn":
-        raise SystemExit(
-            "--arch gnn is not wired into this wrapper yet. coral.emulator.gnn builds the "
-            "network and grid_edge_index builds the connectivity, but a full 1356x882 grid is "
-            "1.2 M nodes and 4.8 M edges per sample, so it needs subgraph sampling before it "
-            "will fit in memory. Train the U-Net baseline first; it is the number the GNN has "
-            "to beat.")
-
     schedule = a.subsample_per_kind or [None]
     results = []
     for n in schedule:
@@ -260,6 +259,18 @@ def main(argv=None):
         print(f"  {tr_ds[0][0].shape[0]} input channels, grid {tuple(tr_ds[0][1].shape[-2:])}"
               f", {'eager' if a.eager else 'lazy'} loading")
         history = []
+        if a.arch == "gnn":
+            # Same members, same split, same loss as the U-Net path, so the comparison is
+            # architecture only. Subgraph sampling is what makes a 1.2 M node grid fit.
+            from coral.emulator import train_gnn as gnn_mod
+            _, best = gnn_mod.train(
+                tr_n, val or [], bci_path=a.bci, epochs=a.epochs, lr=a.lr,
+                hidden=a.hidden, layers=a.layers, sub_nodes=a.sub_nodes,
+                patience=a.patience or None, eval_every=a.eval_every,
+                ckpt=ckpt, tail_gamma=a.tail_gamma, seed=a.seed, history=history)
+            results.append({"n_per_kind": n, "n_train": len(tr_n), "ckpt": ckpt,
+                            "history": history, "best_val_rmse": best, "arch": "gnn"})
+            continue
         model = train_mod.train(
             tr_ds, val=va_ds, epochs=a.epochs, lr=a.lr, base=a.base,
             tail_gamma=a.tail_gamma, ckpt=ckpt, workers=a.workers,

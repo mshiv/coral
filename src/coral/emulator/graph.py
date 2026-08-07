@@ -1,10 +1,7 @@
 """Raster to graph conversion for the GNN emulator.
 
-Cells become nodes, hydraulic adjacency becomes edges. The U-Net is grid-locked: its kernels
-assume a fixed cell size, so a model trained at 30 m cannot run at 4 m. A graph has no such
-assumption provided the edges carry physical scale.
-
-Edge features are length and elevation difference. Without them a message-passing hop has no
+Cells become nodes, hydraulic adjacency becomes edges.
+Edge features are length and elevation difference.
 """
 from dataclasses import dataclass
 

@@ -6,7 +6,7 @@ Each layer updates a node from its neighbours, weighted by edge features. Follow
 hop is a finite-volume flux exchange, so depth is the number of cells information can travel and
 should be set from how far water moves in the modelled window, not tuned blindly.
 
-Edge features enter every message. That makes the model resolution-agnostic: 
+Edge features enter every message. That makes the model resolution-agnostic.
 
 """
 import torch
