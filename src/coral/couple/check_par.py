@@ -26,6 +26,8 @@ PAIRED = [("latlong", "sgc_enable",
 def check_par(par_path):
     """Return a list of problem strings. Empty means the par looks sane."""
     flags, problems = set(), []
+    if not Path(par_path).is_file():
+        return [f"{par_path}: no such par file"]
     for ln in Path(par_path).read_text().splitlines():
         ln = ln.split("#")[0].strip()
         if ln:
