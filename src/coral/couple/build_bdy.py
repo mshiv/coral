@@ -272,7 +272,16 @@ def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc=MODEL_T0_UTC, statio
                    for s in np.arange(t_splice, t_end_s + 1, 360.0)])
     obs = np.interp(om, ot, ov)
     new_secs = np.arange(t_splice, t_end_s + 1, 360.0)[1:]
-    obs_splice, obs_rest = obs[0], obs[1:]
+    obs_rest = obs[1:]
+
+    # Offset is a MEAN over the last tidal cycle, not the value at the splice instant. A single
+    # sample sits at some tidal phase, so an instantaneous offset absorbs the tide instead of the
+    # spatial difference between the boundary point and the gauge, and biases the whole extension.
+    # One M2 cycle is 12.42 h.
+    cyc = 12.42 * 3600.0
+    ct = np.array([(t0 + timedelta(seconds=float(s))).timestamp()
+                   for s in np.arange(t_splice - cyc, t_splice, 360.0)])
+    obs_cycle_mean = float(np.mean(np.interp(ct, ot, ov)))
 
     out, i, nblk = [lines[0]], 1, 0
     while i < len(lines):
@@ -282,8 +291,11 @@ def extend_bdy_observed(bdy_in, bdy_out, *, t_end_s, t0_utc=MODEL_T0_UTC, statio
         parts = lines[i + 1].split()
         n, unit = int(parts[0]), (parts[1] if len(parts) > 1 else "seconds")
         rows = lines[i + 2:i + 2 + n]
-        last_v = float(rows[-1].split()[0])
-        off = last_v - obs_splice
+        rv = np.array([float(r.split()[0]) for r in rows])
+        rt = np.array([float(r.split()[1]) for r in rows])
+        sel = rv[rt >= t_splice - cyc]
+        bdy_cycle_mean = float(sel.mean()) if sel.size else float(rv[-1])
+        off = bdy_cycle_mean - obs_cycle_mean
         rows = list(rows) + [f"{v + off:.4f}\t{s:.1f}" for v, s in zip(obs_rest, new_secs)]
         out += [name, f"{len(rows)}\t\t{unit}"] + rows
         i += 2 + n; nblk += 1
