@@ -9,7 +9,7 @@ domain:
 geoclaw:
   refine_box: [-81.111, -80.819, 31.804, 32.100]
 coupling:
-  landfall_utc: "2016-10-08T06:00:00"   # GeoClaw t=0 (Matthew closest approach, Savannah)
+  landfall_utc: "2016-10-08T13:00:00"   # GeoClaw t=0 (Matthew closest approach, Savannah)
 forcing:
   rainfall: aorc        # compound forcing (AORC)
   rain_mode: uniform    # uniform now; dynamic spatial rain pending the netCDF fix

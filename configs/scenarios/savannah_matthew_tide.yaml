@@ -14,7 +14,7 @@ geoclaw:
   sea_level: 0.0        # MSL -> pure surge residual (needs a GeoClaw rerun at MSL)
   refine_box: [-81.111, -80.819, 31.804, 32.100]
 coupling:
-  landfall_utc: "2016-10-08T06:00:00"
+  landfall_utc: "2016-10-08T13:00:00"
 forcing:
   tide: noaa            # time-varying tide from NOAA CO-OPS (Fort Pulaski)
   tide_station: "8670870"
