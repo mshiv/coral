@@ -180,10 +180,38 @@ class Scenario:
 
     @property
     def landfall_dt(self):
-        """Calendar UTC datetime of landfall (model t=0), or None if unset."""
+        """Calendar UTC datetime of landfall (model t=0), or None if unset.
+
+        Checked against the measured model epoch. `landfall_utc - landfall_s` is model
+        time zero, and `build_bdy.MODEL_T0_UTC` holds the same quantity measured by
+        cross-correlating the boundary surge against the Fort Pulaski record. Nothing
+        used to compare them, so when the epoch was measured the configs kept an earlier
+        guess and every series placed on the model clock was shifted by 7 hours: the
+        tide by a near half-cycle, and the rainfall relative to the surge.
+        """
         if self.coupling.landfall_utc is None:
             return None
-        return datetime.fromisoformat(self.coupling.landfall_utc)
+        lf = datetime.fromisoformat(self.coupling.landfall_utc)
+        self._check_epoch(lf)
+        return lf
+
+    def _check_epoch(self, landfall_dt, tol_s=60.0):
+        """Warn if the config epoch disagrees with the measured one."""
+        from datetime import timedelta
+        try:
+            from .couple.build_bdy import MODEL_T0_UTC
+        except ImportError:
+            return
+        measured = datetime.fromisoformat(MODEL_T0_UTC)
+        implied = landfall_dt - timedelta(seconds=self.coupling.landfall_s)
+        off = (implied - measured).total_seconds()
+        if abs(off) > tol_s:
+            import warnings
+            warnings.warn(
+                f"model epoch mismatch: landfall_utc - landfall_s = {implied.isoformat()}, "
+                f"but the measured epoch is {measured.isoformat()} ({off/3600:+.2f} h). "
+                "Tide and rainfall series built from this config will be shifted by that "
+                "amount relative to the surge.", stacklevel=2)
 
     def rain_window_utc(self):
         """(start, end) real UTC datetimes spanning the sim window, the rainfall
