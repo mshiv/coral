@@ -89,14 +89,24 @@ def validate(full_bdy, surge_bdy, block="bc1", *, begin="20161005", end="2016101
                     bias=float(np.mean(a - b)))
 
     tlf = 172800.0
+    # Peak comparison: does the boundary reproduce the observed storm peak, and when?
+    km, ko = int(full.argmax()), int(obs.argmax())
     res = {
         "tide_vs_pred": _stats(tide_model, pred),
         "full_vs_obs": _stats(full, obs),
+        "peak": dict(model_max=float(full[km]), model_t=float(T[km]),
+                     obs_max=float(obs[ko]), obs_t=float(T[ko]),
+                     model_minus_obs=float(full[km] - obs[ko])),
         "landfall": dict(model_tide=float(np.interp(tlf, ft, fv) - np.interp(tlf, st, sv)),
                          noaa_pred=float(np.interp(tlf, pred_t, pred_v)),
                          model_full=float(np.interp(tlf, ft, fv)),
                          noaa_obs=float(np.interp(tlf, obs_t, obs_v))),
     }
+    pk = res["peak"]
+    print(f"storm peak: model {pk['model_max']:.2f} m at t={pk['model_t']:.0f} | "
+          f"observed {pk['obs_max']:.2f} m at t={pk['obs_t']:.0f} | "
+          f"model-obs {pk['model_minus_obs']:+.2f} m  "
+          f"({'UNDER' if pk['model_minus_obs']<0 else 'over'}-predicts the peak)")
 
     print(f"tide (model) vs NOAA prediction : r={res['tide_vs_pred']['r']:.4f}  "
           f"rmse={res['tide_vs_pred']['rmse']:.3f} m  bias={res['tide_vs_pred']['bias']:+.3f} m")
@@ -116,6 +126,10 @@ def validate(full_bdy, surge_bdy, block="bc1", *, begin="20161005", end="2016101
         ax[0].plot(hr, obs, "k", lw=1.5, label="NOAA observed (Fort Pulaski)")
         ax[0].plot(hr, full, "C3", lw=1.2, label="model boundary (surge+tide)")
         ax[0].axvline(0, color="0.6", ls="--", lw=0.8)
+        ax[0].plot((pk["obs_t"] - tlf) / 3600, pk["obs_max"], "kv", ms=7)
+        ax[0].plot((pk["model_t"] - tlf) / 3600, pk["model_max"], "C3v", ms=7)
+        ax[0].annotate(f"peak {pk['model_minus_obs']:+.2f} m", (0.02, 0.95),
+                       xycoords="axes fraction", fontsize=8, va="top")
         ax[0].set_ylabel("water level (m NAVD88)")
         ax[0].set_title(f"Boundary vs observed water level  "
                         f"(r={res['full_vs_obs']['r']:.3f}, RMSE {res['full_vs_obs']['rmse']:.2f} m)")
@@ -136,15 +150,66 @@ def validate(full_bdy, surge_bdy, block="bc1", *, begin="20161005", end="2016101
     return res
 
 
+# Subordinate NOAA stations on the Vernon/Wilmington/Skidaway system near Pin Point. Harmonic
+# prediction only (no sensor), but the astronomical constituents are time-invariant, so the
+# tidal transformation they encode holds for any period including Matthew.
+PINPOINT_TIDE_STATIONS = {"8671086": "Skidaway Institute", "8671315": "Priest Landing"}
+
+
+def tidal_transformation(open_coast=FORT_PULASKI, local=PINPOINT_TIDE_STATIONS,
+                         begin="20200601", end="20200615"):
+    """Amplitude ratio and phase lag of the astronomical tide, local vs open coast.
+
+    Characterises whether imposing the Fort Pulaski tide at a boundary 15 km inside the
+    estuary is appropriate. Uses harmonic predictions (demeaned to remove datum), so it
+    is valid for any period; the window only needs to be long enough to span spring-neap.
+    Returns {station: {amp_ratio, range_m, phase_lag_min, r}}.
+    """
+    def _pred(st):
+        u = ("https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions"
+             f"&application=coral&begin_date={begin}&end_date={end}&datum=MSL&station={st}"
+             "&time_zone=gmt&units=metric&interval=h&format=json")
+        d = json.load(urllib.request.urlopen(u, timeout=90))["predictions"]
+        t = np.array([datetime.strptime(p["t"], "%Y-%m-%d %H:%M")
+                      .replace(tzinfo=timezone.utc).timestamp() for p in d])
+        v = np.array([float(p["v"]) for p in d])
+        return t, v - v.mean()
+
+    tf, vf = _pred(open_coast)
+    T = np.arange(tf[0], tf[-1], 600.0)
+    F = np.interp(T, tf, vf)
+    lags = np.arange(-3 * 3600, 3 * 3600, 600.0)
+    out = {}
+    for st, name in local.items():
+        tl, vl = _pred(st)
+        X = np.interp(T, tl, vl)
+        rr = [float(np.corrcoef(X, np.interp(T + L, T, F))[0, 1]) for L in lags]
+        out[name] = dict(amp_ratio=float((X.max() - X.min()) / (F.max() - F.min())),
+                         range_m=float(X.max() - X.min()),
+                         phase_lag_min=float(lags[int(np.argmax(rr))] / 60.0),
+                         r=float(max(rr)))
+        print(f"  {name:22s} amp x{out[name]['amp_ratio']:.3f}  "
+              f"phase {out[name]['phase_lag_min']:+.0f} min  r {out[name]['r']:.4f}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--full", required=True, help="surge+tide .bdy (e.g. matthew_tide.bdy)")
-    ap.add_argument("--surge", required=True, help="surge-only .bdy (e.g. matthew_savannah.bdy)")
+    ap.add_argument("--transform", action="store_true",
+                    help="report the Fort Pulaski -> Pin Point tidal transformation and exit")
+    ap.add_argument("--full", help="surge+tide .bdy (e.g. matthew_tide.bdy)")
+    ap.add_argument("--surge", help="surge-only .bdy (e.g. matthew_savannah.bdy)")
     ap.add_argument("--block", default="bc1")
     ap.add_argument("--begin", default="20161005"); ap.add_argument("--end", default="20161016")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
+    if a.transform:
+        print("astronomical tide transformation, Fort Pulaski -> Pin Point:")
+        tidal_transformation()
+        return
+    if not (a.full and a.surge):
+        ap.error("--full and --surge are required unless --transform")
     validate(a.full, a.surge, a.block, begin=a.begin, end=a.end, out=a.out)
 
 
