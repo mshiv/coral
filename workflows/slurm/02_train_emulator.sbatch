@@ -79,7 +79,7 @@ except Exception as e:
     print("  Use rtx6000 (7.5), a100 (8.0), l40s (8.9) or h100 (9.0), not v100 (7.0).")
     sys.exit(1)
 PYCHK
-NDONE=$(ls "$TRAIN"/*/results_matthew_sav/res_matthew_sav.max 2>/dev/null | wc -l | tr -d ' ')
+NDONE=$(ls "$TRAIN"/*/results_*/res_*.max 2>/dev/null | wc -l | tr -d ' ')
 NPLAN=$(wc -l < "$TRAIN/run_dirs.txt")
 log "$NDONE of $NPLAN members finished"
 [ "$NDONE" -ge 50 ] && ok "enough members to train on" \
@@ -141,7 +141,26 @@ case "$MODE" in
       --ckpt "$OUTDIR/emulator_unet_curve.pt" \
       --report "$OUTDIR/emulator_unet_curve_n50.report.json"
     ;;
-  *) bad "unknown mode $MODE (use holdout, valid, curve, or curve50)"; exit 1 ;;
+  holdout-slr)
+    # Hold out one sea level (extrapolation test). $2 = the SLR label, e.g. High2100.
+    HOLD=${2:-High2100}
+    log "holdout SLR: $HOLD"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" --holdout-slr "$HOLD" \
+      --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_holdout_slr_${HOLD}.pt" \
+      --report "$OUTDIR/emulator_unet_holdout_slr_${HOLD}.report.json" ;;
+  holdout-kind)
+    # Hold out one intervention kind (generalisation test — the actual use case).
+    # $2 = the kind, e.g. seawall. Trains on the other four, predicts the fifth.
+    HOLD=${2:-seawall}
+    log "holdout kind: $HOLD"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" --holdout-kind "$HOLD" \
+      --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_holdout_kind_${HOLD}.pt" \
+      --report "$OUTDIR/emulator_unet_holdout_kind_${HOLD}.report.json" ;;
+  *) bad "unknown mode $MODE (use holdout, holdout-slr, holdout-kind, valid, curve, or curve50)"; exit 1 ;;
 esac
 RC=$?
 
