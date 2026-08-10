@@ -9,6 +9,8 @@
 #   sbatch workflows/slurm/02_train_emulator.sbatch                 # holdout sea levels
 #   sbatch workflows/slurm/02_train_emulator.sbatch valid           # validate on valid30m
 #   sbatch workflows/slurm/02_train_emulator.sbatch curve           # learning curve sweep
+#   sbatch workflows/slurm/02_train_emulator.sbatch holdout-placement 20
+#   sbatch workflows/slurm/02_train_emulator.sbatch curve-placement 20
 #SBATCH --job-name=coral-train
 #SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=8
@@ -160,7 +162,43 @@ case "$MODE" in
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_holdout_kind_${HOLD}.pt" \
       --report "$OUTDIR/emulator_unet_holdout_kind_${HOLD}.report.json" ;;
-  *) bad "unknown mode $MODE (use holdout, holdout-slr, holdout-kind, valid, curve, or curve50)"; exit 1 ;;
+  holdout-placement|holdout-realisation)
+    # The production test: train on every kind and sea level, validate on unseen placements
+    # of known kinds. $2 = realisation threshold: members with realisation index >= $2 go to
+    # validation, the rest train. That is the highest (n_per_kind - $2) realisations per kind
+    # per level. pp4_tide_decision has n_per_kind=25, so `holdout-placement 20` trains on 20
+    # realisations per kind per level and validates on the highest 5 (indices 20-24). A user
+    # in the tool draws a wall somewhere the model has not seen, so this is the split that
+    # measures the deployment claim; holdout-slr (unseen forcing) and holdout-kind (unseen
+    # type) are the complementary stress tests.
+    THRESH=${2:-20}
+    log "holdout placement: realisations >= $THRESH validate"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" --holdout-realisation "$THRESH" \
+      --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_holdout_placement.pt" \
+      --report "$OUTDIR/emulator_unet_holdout_placement.report.json" ;;
+  curve-placement)
+    # Learning curve for the production test: does accuracy still improve with more
+    # realisations per kind when validation is unseen PLACEMENTS of known kinds?
+    # $2 = realisation threshold (default 20), same semantics as holdout-placement: realisations
+    # >= $2 validate and are never subsampled into a training point. Each subsample n keeps
+    # realisations 0..n-1, so as long as n <= $2 the training pool stays disjoint from
+    # validation. This assumes n_per_kind=25: subsamples 10, 15, 20 are the distinct points,
+    # and the n=20 point is the same training data as `holdout-placement 20`, so it doubles as
+    # that model's estimate at 200 epochs. A flat curve means 25/kind is plenty for the next
+    # ensemble; a curve still falling at 20 says raise n_per_kind.
+    THRESH=${2:-20}
+    log "learning curve vs placement: realisations >= $THRESH validate, subsample 10/15/20"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" \
+      --holdout-realisation "$THRESH" \
+      --subsample-per-kind 10 15 20 \
+      --epochs 200 --patience 8 --workers 8 \
+      --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_curve_placement.pt" \
+      --report "$OUTDIR/emulator_unet_curve_placement.report.json" ;;
+  *) bad "unknown mode $MODE (use holdout, holdout-slr, holdout-kind, holdout-placement, curve-placement, valid, curve, or curve50)"; exit 1 ;;
 esac
 RC=$?
 
