@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections import Counter
 from pathlib import Path
 import numpy as np
 
@@ -43,7 +44,23 @@ def apply_slr_to_bdy(bdy_in, bdy_out, slr_m):
     Path(bdy_out).write_text("\n".join(out) + "\n")
 
 
-def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0):
+# Prime stride between wall slots. It is larger than any plausible candidate-contour count on
+# this grid, so two walls in one member always index distinct alignments (see seawall_line_mask).
+_WALL_STRIDE = 1009
+
+
+def _sample_wall_count(rng, max_walls):
+    """Draw 1..max_walls, weighted toward few walls (weights ~ 1/k).
+
+    The marsh peninsula has finite tie-in ground, and the buildings a wall can shelter saturate
+    after two or three lines, so the mass sits on the small end. The long tail still matters:
+    user-drawn multi-wall systems are the tool's premise, so the emulator must see big systems.
+    """
+    ks = np.arange(1, max_walls + 1)
+    return int(rng.choice(ks, p=(1.0 / ks) / (1.0 / ks).sum()))
+
+
+def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0, seawall_walls=None):
     """Build the sweep spec: baseline + single interventions x SLR (+ optional
     pairwise combos). Returns a list of {name, slr_m, slr_label, interventions:[knobs,...]}.
 
@@ -51,6 +68,12 @@ def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0):
     list of (label, float) tuples (name f"slr{label}", e.g. slrInt2050), for SLR levels
     resolved from NOAA scenarios via preprocess.fetch_slr.slr_levels. Mixed lists are
     fine; each entry is normalized independently.
+
+    `seawall_walls` (int, optional) samples how many walls each seawall member gets, from 1 to
+    that number and weighted toward few. None keeps exactly one wall per member, which is the
+    classic single-structure ensemble; set it to teach the emulator wall systems. Each wall is a
+    separate knob with its own `wall_slot`, and build_sweep turns those slots into distinct
+    alignments so a member really contains N different walls.
     """
     rng = np.random.default_rng(seed)
     specs = []
@@ -65,8 +88,15 @@ def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0):
         for kind in kinds:
             for j in range(n_per_kind):
                 kb = sample_intervention(kind, rng)
+                if kind == "seawall" and seawall_walls:
+                    n_walls = _sample_wall_count(rng, seawall_walls)
+                    kb["wall_slot"] = 0
+                    knobs = [kb] + [dict(sample_intervention(kind, rng), wall_slot=s)
+                                    for s in range(1, n_walls)]
+                else:
+                    knobs = [kb]
                 specs.append({"name": f"slr{tag}_{kind}{j}", "slr_m": slr, "slr_label": label,
-                              "interventions": [kb]})
+                              "interventions": knobs})
         if include_combos:                       # a few multi-intervention configs
             for j in range(n_per_kind):
                 combo = [sample_intervention(k, rng) for k in rng.choice(kinds, 2, replace=False)]
@@ -122,8 +152,16 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         from ..preprocess.make_manning import classes_on_dem
         classes, _ = classes_on_dem(nlcd, str(dem_p))
     passthrough = [p for p in base.glob("*")
-                   if p.suffix in (".bci", ".par", ".txt", ".nc", ".sbatch", ".sh")
+                   if p.suffix in (".bci", ".par", ".txt", ".nc", ".sbatch", ".sh", ".asc")
                    or p.suffix == ""]   # "" = the lisflood binary; .sbatch = job script
+    # The four grids stage_grid writes (or symlinks) into every member are handled above;
+    # exclude them here so the passthrough loop cannot re-link the BASE files over the EDITED
+    # member grids. That used to happen whenever a base dir carried a fifth .asc (e.g. a
+    # primed startfile), which was silently dropped instead — members then lacked the grid and
+    # LISFLOOD aborted. Now any extra .asc (startfile, etc.) passes through like the other
+    # shared inputs.
+    staged = {p.name for p in (dem_p, man_p, ksat_p, cap_p) if p is not None}
+    passthrough = [p for p in passthrough if p.name not in staged]
 
     # Shared, deduplicated inputs. Copying every grid into every member costs about 120 MB
     # per member, and most of it is redundant: the .bdy depends only on the SLR level, so a
@@ -166,9 +204,11 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         # instead of letting it migrate inland as the sea rises.
         member_sea_level = sea_level + float(spec.get("slr_m", 0.0))
         # Member index, so floodwall alignments are drawn without replacement: N members get N
-        # distinct alignments instead of N independent draws that can repeat.
+        # distinct alignments instead of N independent draws that can repeat. Multi-wall members
+        # step the index by _WALL_STRIDE per wall slot, so each knob draws its own alignment and
+        # the second knob is not a silent no-op on top of the first.
         for kb in spec["interventions"]:
-            kb.setdefault("alignment_index", _mi)
+            kb.setdefault("alignment_index", _mi + kb.pop("wall_slot", 0) * _WALL_STRIDE)
             dem, man, ksat, awc, _ = apply_intervention(kb, dem, man, ksat, awc,
                                                         sea_level=member_sea_level,
                                                         classes=classes, focus=focus,
@@ -189,9 +229,16 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         forcing = {"slr_m": spec["slr_m"]}
         if spec.get("slr_label"):
             forcing["slr_label"] = spec["slr_label"]
+        seen = set()
         for kb in spec["interventions"]:                    # flatten knobs as features
+            if kb["kind"] in seen:                          # wall systems: keep the first wall,
+                continue                                    # the count captures the rest
+            seen.add(kb["kind"])
             forcing.update({f"{kb['kind']}_{k}": v for k, v in kb.items()
-                            if k not in ("kind", "seed")})
+                            if k not in ("kind", "seed", "wall_slot")})
+        for k, n in Counter(kb["kind"] for kb in spec["interventions"]).items():
+            if n > 1:
+                forcing[f"{k}_n_walls"] = n
         # Absolute, matching run_dirs.txt. A relative run_dir only resolves from the repo
         # root, so any tool run from the ensemble directory itself reports every member as
         # absent, which looks like total data loss rather than a path bug.
@@ -357,7 +404,8 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
         from ..preprocess.fetch_slr import slr_levels as resolve_slr_scenarios
         targets = [(scen, year) for scen, year in iv.slr_scenarios]
         slr_levels_all += resolve_slr_scenarios(targets, station=cfg.forcing.tide_station)
-    specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed)
+    specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed,
+                       seawall_walls=iv.seawall_walls)
     return build_sweep(base_dir, specs, out_root, root=root, sea_level=cfg.geoclaw.sea_level,
                        focus_center=cfg.domain.ref_point,
                        focus_radius_km=iv.focus_radius_km or cfg.domain.focus_radius_km,

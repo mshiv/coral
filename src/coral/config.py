@@ -142,6 +142,10 @@ class Interventions:
     include_combos: bool = True
     focus_radius_km: Optional[float] = None   # restrict siting to this radius of ref_point
     seed: int = 0
+    seawall_walls: Optional[int] = None       # None = one wall per seawall member (classic
+    #                                            single-structure ensemble); int N samples
+    #                                            1..N walls, weighted toward few, so the
+    #                                           ensemble teaches the emulator wall systems
     # SAGIS context data (paths) for conditioned siting; None = generic elevation/NLCD siting
     wetlands: Optional[str] = None            # NWI geojson -> marsh/mangrove footprint
     soils_geojson: Optional[str] = None       # SSURGO soils geojson (MUKEY) -> de-pave Ksat cap
