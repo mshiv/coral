@@ -103,6 +103,21 @@ def pick_samples(manifest, kinds=None, per_kind=3, seed=0):
     return out
 
 
+def _window(changed, h, ref_point, clip_bbox, pad=25):
+    """Crop over the changed cells plus the reference marks, so an intervention far from the
+    community still shows Pin Point and the building-clip rectangle."""
+    rs, cs = np.where(changed)
+    pr, pc = _rowcol(h, *ref_point)
+    w, e_, s, n = clip_bbox
+    br, bc = _rowcol(h, w, n)
+    tr_, tc = _rowcol(h, e_, s)
+    rmin = min(rs.min(), pr, br, tr_); rmax = max(rs.max(), pr, br, tr_)
+    cmin = min(cs.min(), pc, bc, tc); cmax = max(cs.max(), pc, bc, tc)
+    r0, r1 = max(0, rmin - pad), min(changed.shape[0], rmax + pad + 1)
+    c0, c1 = max(0, cmin - pad), min(changed.shape[1], cmax + pad + 1)
+    return r0, r1, c0, c1
+
+
 def gallery(ensemble_dir, base_dir, out_png, *, kinds=None, per_kind=3,
             ref_point=(-81.0903, 31.9522),
             clip_bbox=(-81.1103, -81.0727, 31.9367, 31.9690), seed=0):
@@ -139,20 +154,11 @@ def gallery(ensemble_dir, base_dir, out_png, *, kinds=None, per_kind=3,
     changed = np.zeros_like(panels[0][4], bool)
     for *_, arr, _ in panels:
         changed |= np.abs(arr) > TOL
-    rs, cs = np.where(changed)
+    r0, r1, c0, c1 = _window(changed, h, ref_point, clip_bbox)
     pr, pc = _rowcol(h, *ref_point)
     w, e_, s, n = clip_bbox
     br, bc = _rowcol(h, w, n)
     tr_, tc = _rowcol(h, e_, s)
-
-    # The window covers the changed cells AND the reference marks. If an intervention sits
-    # nowhere near the community, that is the single most important thing the figure can show,
-    # and cropping to the footprints alone would push Pin Point off the panel and hide it.
-    pad = 25
-    rmin = min(rs.min(), pr, br, tr_); rmax = max(rs.max(), pr, br, tr_)
-    cmin = min(cs.min(), pc, bc, tc); cmax = max(cs.max(), pc, bc, tc)
-    r0, r1 = max(0, rmin - pad), min(changed.shape[0], rmax + pad + 1)
-    c0, c1 = max(0, cmin - pad), min(changed.shape[1], cmax + pad + 1)
 
     bmax = next(iter(sorted(Path(base_dir).glob("results_*/*.max"))), None)
     wet = (read_depth(bmax) > 0.05)[r0:r1, c0:c1] if bmax else None
@@ -200,6 +206,103 @@ def gallery(ensemble_dir, base_dir, out_png, *, kinds=None, per_kind=3,
     return out_png
 
 
+def member_fields(ensemble_dir, base_dir, out_dir, *, kinds=None, per_kind=3,
+                  ref_point=(-81.0903, 31.9522),
+                  clip_bbox=(-81.1103, -81.0727, 31.9367, 31.9690), seed=0):
+    """One figure per sampled member, with a panel for every edited grid plus the footprint mask.
+
+    The gallery() grid draws only the primary signal (DEM for seawall and retreat, Manning
+    otherwise) and leaves the other edits as a string in the title. That is enough to judge
+    placement but not to see what a seawall actually changes: it raises the DEM and sets
+    n=0.015 on the wall cells, and the gallery never draws that second edit. This writes one
+    PNG per member, each with a panel per edited grid (dem, manning, ksat, awc) and a final
+    mask panel showing the union of all changed cells, so the figure shows everything a member
+    touched rather than the one field the gallery chose to highlight.
+    """
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    ens = Path(ensemble_dir)
+    manifest = json.load(open(ens / "manifest.json"))
+    picks = pick_samples(manifest, kinds=kinds, per_kind=per_kind, seed=seed)
+    if not picks:
+        raise SystemExit("no members matched; check --kinds against the manifest")
+
+    dem_p = next(iter(sorted(Path(base_dir).glob("SUB_DEM*.asc"))))
+    h = _hdr(dem_p)
+    out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    bmax = next(iter(sorted(Path(base_dir).glob("results_*/*.max"))), None)
+    wet_full = (read_depth(bmax) > 0.05) if bmax else None
+    pr, pc = _rowcol(h, *ref_point)
+    w, e_, s, n = clip_bbox
+    br, bc = _rowcol(h, w, n)
+    tr_, tc = _rowcol(h, e_, s)
+
+    written = 0
+    for kind, size, e in picks:
+        rd = Path(e["run_dir"])
+        if not rd.is_absolute():
+            rd = ens / rd.name
+        if not rd.is_dir():
+            continue
+        d = member_deltas(rd, base_dir)
+        if not d:
+            continue
+        names = sorted(d)
+        mask = np.zeros_like(d[names[0]], bool)
+        for arr in d.values():
+            mask |= np.abs(arr) > TOL
+        r0, r1, c0, c1 = _window(mask, h, ref_point, clip_bbox)
+        wet = wet_full[r0:r1, c0:c1] if wet_full is not None else None
+
+        ncol = len(names) + 1
+        fig, axes = plt.subplots(1, ncol, figsize=(3.9 * ncol, 4.0), squeeze=False)
+        # first panel: the mask, i.e. the union of every grid a member edited
+        ax = axes[0][0]
+        wnd = mask[r0:r1, c0:c1]
+        if wet is not None:
+            ax.imshow(np.where(wet, 1.0, np.nan), cmap="Greys", vmin=0, vmax=3,
+                      interpolation="none")
+        ax.imshow(np.where(wnd, 1.0, np.nan), cmap="Greys", vmin=0, vmax=1,
+                  interpolation="none", alpha=0.85)
+        ax.plot(pc - c0, pr - r0, marker="*", ms=13, color="#111", mew=0.6, mec="w", zorder=6)
+        ax.add_patch(Rectangle((bc - c0, br - r0), tc - bc, tr_ - br, fill=False,
+                               ec="#111", lw=1.1, ls="--", zorder=5))
+        frac = 100.0 * wnd.sum() / wnd.size
+        ax.set_title(f"mask  {frac:.2f}% of domain", fontsize=9)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xlim(-0.5, (c1 - c0) - 0.5); ax.set_ylim((r1 - r0) - 0.5, -0.5)
+        # one panel per edited grid
+        for j, name in enumerate(names):
+            ax = axes[0][j + 1]
+            wnd = d[name][r0:r1, c0:c1]
+            if wet is not None:
+                ax.imshow(np.where(wet, 1.0, np.nan), cmap="Greys", vmin=0, vmax=3,
+                          interpolation="none")
+            v = np.abs(wnd[np.abs(wnd) > TOL])
+            vmax = np.percentile(v, 99) if v.size else 1.0
+            im = ax.imshow(np.where(np.abs(wnd) > TOL, wnd, np.nan), cmap="RdBu_r",
+                           vmin=-vmax, vmax=vmax, interpolation="none")
+            ax.plot(pc - c0, pr - r0, marker="*", ms=13, color="#111", mew=0.6, mec="w", zorder=6)
+            ax.add_patch(Rectangle((bc - c0, br - r0), tc - bc, tr_ - br, fill=False,
+                                   ec="#111", lw=1.1, ls="--", zorder=5))
+            f2 = 100.0 * (np.abs(wnd) > TOL).sum() / wnd.size
+            ax.set_title(f"{name}  {f2:.2f}%", fontsize=9)
+            ax.set_xticks([]); ax.set_yticks([])
+            ax.set_xlim(-0.5, (c1 - c0) - 0.5); ax.set_ylim((r1 - r0) - 0.5, -0.5)
+            fig.colorbar(im, ax=ax, shrink=.75)
+        fig.suptitle(f"{kind}  size {size:.2f}  (member {e['name']})", fontsize=11)
+        fig.tight_layout(rect=(0, 0, 1, 0.93))
+        png = out / f"{kind}_{e['name']}.png"
+        fig.savefig(png, dpi=150); plt.close(fig)
+        written += 1
+        print(f"member_fields -> {png}  (edits: {', '.join(names)})")
+    if not written:
+        raise SystemExit("no members had an edited grid; are they all symlinked to base?")
+    return out
+
+
 def _main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="Grid of sampled intervention placements")
@@ -208,8 +311,13 @@ def _main(argv=None):
     ap.add_argument("--kinds", nargs="+", default=None)
     ap.add_argument("--per-kind", type=int, default=3)
     ap.add_argument("--out", default="reports/adapt/intervention_gallery.png")
+    ap.add_argument("--fields-out", default=None,
+                    help="also write one figure per member with a panel for every edited grid "
+                         "plus the footprint mask")
     a = ap.parse_args(argv)
     gallery(a.ensemble_dir, a.base, a.out, kinds=a.kinds, per_kind=a.per_kind)
+    if a.fields_out:
+        member_fields(a.ensemble_dir, a.base, a.fields_out, kinds=a.kinds, per_kind=a.per_kind)
     return 0
 
 
