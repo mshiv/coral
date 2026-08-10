@@ -303,6 +303,107 @@ def member_fields(ensemble_dir, base_dir, out_dir, *, kinds=None, per_kind=3,
     return out
 
 
+def seawall_figures(ensemble_dir, base_dir, buildings_geojson, out_png, *,
+                    kinds=None, per_kind=5, ref_point=(-81.0903, 31.9522),
+                    clip_bbox=(-81.1103, -81.0727, 31.9367, 31.9690), seed=0,
+                    sea_level=0.81, tie_elev_m=1.0, res_m=4.0):
+    """Real seawall members in the floodwall-siting style: terrain, sea, buildings, the wall line.
+
+    The delta maps elsewhere show WHERE a member edited land-surface fields; this shows the
+    wall itself, the way the siting figures did: base DEM in terrain colours, water as blue,
+    FEMA structures dark, and the raised crest as a coloured alignment, with a zoom panel per
+    member around the wall. Structure counts are buildings within 150 m of the crest, and the
+    tie-in ground (z >= sea_level + tie_elev_m) is overlaid so a member whose ends do not reach
+    high ground is visible at a glance.
+    """
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mc
+    from matplotlib.patches import Rectangle
+    from scipy import ndimage
+
+    from coral.emulator.dataset import read_asc
+    from coral.interventions.context_rasters import buildings_mask
+
+    ens = Path(ensemble_dir)
+    manifest = json.load(open(ens / "manifest.json"))
+    picks = pick_samples(manifest, kinds=["seawall"], per_kind=per_kind, seed=seed)
+    if not picks:
+        raise SystemExit("no seawall members matched; check the manifest kinds")
+
+    base_dem_p = next(iter(sorted(Path(base_dir).glob("SUB_DEM*.asc"))))
+    base_dem, h = read_asc(base_dem_p)
+    base_dem = np.where(np.isfinite(base_dem), base_dem, -10.0)
+    bld = buildings_mask(buildings_geojson, base_dem_p)
+    res = res_m
+    tie = base_dem >= sea_level + tie_elev_m
+
+    walls = []
+    for kind, size, e in picks:
+        rd = Path(e["run_dir"])
+        if not rd.is_absolute():
+            rd = ens / rd.name
+        if not rd.is_dir():
+            continue
+        m_dem_p = next(iter(sorted(rd.glob("SUB_DEM*.asc"))), None)
+        if m_dem_p is None:
+            continue
+        m_dem, _ = read_asc(m_dem_p)
+        m_dem = np.where(np.isfinite(m_dem), m_dem, -10.0)
+        wall = (m_dem - base_dem) > TOL
+        if not wall.any():
+            continue
+        # structure protection: buildings within 150 m of the crest, as in the siting figures
+        prot = int((ndimage.binary_dilation(wall, iterations=int(150 / res)) & bld).sum())
+        # end-to-end span in metres, from the wall's bounding diagonal
+        rr, cc = np.nonzero(wall)
+        span_m = res * float(np.hypot(rr.max() - rr.min(), cc.max() - cc.min()))
+        walls.append((kind, size, e["name"], wall, span_m, prot))
+    if not walls:
+        raise SystemExit("no seawall member had a raised crest; are they symlinked to base?")
+    n = len(walls)
+    cols = plt.cm.turbo(np.linspace(.08, .95, n))
+
+    fig = plt.figure(figsize=(16, 4.6 + 3.6 * n))
+    gs = fig.add_gridspec(2, n, height_ratios=[1, 1], hspace=0.32)
+    ov = fig.add_subplot(gs[0, :])
+    ov.imshow(np.where(base_dem > sea_level, base_dem, np.nan), cmap="terrain", vmin=0, vmax=6)
+    ov.imshow(np.where(base_dem <= sea_level, 1., np.nan), cmap="Blues", vmin=0, vmax=1.7)
+    ov.imshow(np.where(bld, 1., np.nan), cmap=mc.ListedColormap(["#222"]), vmin=0, vmax=1)
+    for (kind, size, name, wall, span, prot), c in zip(walls, cols):
+        r, cc = np.nonzero(wall)
+        ov.scatter(cc, r, s=3, c=c, marker="s", linewidths=0,
+                   label=f"{name}  {span:.0f} m, {prot} structures")
+    ov.legend(loc="lower left", fontsize=9, markerscale=3, framealpha=.9)
+    ov.set_xticks([]); ov.set_yticks([])
+    ov.set_title("Real seawall members, raised crest on the base terrain\n"
+                 "blue = water, dark = FEMA structures", fontsize=10.5)
+
+    for k, (kind, size, name, wall, span, prot) in enumerate(walls):
+        a = fig.add_subplot(gs[1, k])
+        r, cc = np.nonzero(wall)
+        pad = 40
+        r0 = max(r.min() - pad, 0); r1 = min(r.max() + pad, base_dem.shape[0])
+        c0 = max(cc.min() - pad, 0); c1 = min(cc.max() + pad, base_dem.shape[1])
+        sl = (slice(r0, r1), slice(c0, c1))
+        a.imshow(np.where(base_dem[sl] > sea_level, base_dem[sl], np.nan), cmap="terrain", vmin=0, vmax=6)
+        a.imshow(np.where(base_dem[sl] <= sea_level, 1., np.nan), cmap="Blues", vmin=0, vmax=1.7)
+        a.imshow(np.where(tie[sl], 1., np.nan), cmap=mc.ListedColormap(["#7a5c3a"]), vmin=0, vmax=1, alpha=.35)
+        a.imshow(np.where(bld[sl], 1., np.nan), cmap=mc.ListedColormap(["#222"]), vmin=0, vmax=1)
+        rr, ccc = np.nonzero(wall[sl])
+        a.scatter(ccc, rr, s=11, c=cols[k], marker="s", linewidths=0)
+        a.set_xticks([]); a.set_yticks([])
+        a.set_title(f"{name}  {span:.0f} m\n{prot} structures within 150 m", fontsize=9)
+    fig.suptitle("Seawall member placements, Pin Point 4 m. Wall = raised crest on the base DEM.\n"
+                 "brown = tie-in ground (z >= %.2f m): ends reaching it are not flanked." % tie_elev_m,
+                 fontsize=11)
+    fig.tight_layout(rect=(0, 0, 1, 1 - 0.05 / max(n, 1) * 2))
+    Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=150, bbox_inches="tight"); plt.close(fig)
+    print(f"seawall_figures -> {out_png}  ({n} members)")
+    return out_png
+
+
 def _main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="Grid of sampled intervention placements")
@@ -314,10 +415,18 @@ def _main(argv=None):
     ap.add_argument("--fields-out", default=None,
                     help="also write one figure per member with a panel for every edited grid "
                          "plus the footprint mask")
+    ap.add_argument("--seawall-fig", default=None,
+                    help="render sampled seawall members in the floodwall-siting style "
+                         "(terrain + sea + buildings + crest) to this PNG")
+    ap.add_argument("--buildings", default="data/raw/fema_structures_pinpoint.geojson",
+                    help="FEMA structure footprints, required by --seawall-fig")
     a = ap.parse_args(argv)
     gallery(a.ensemble_dir, a.base, a.out, kinds=a.kinds, per_kind=a.per_kind)
     if a.fields_out:
         member_fields(a.ensemble_dir, a.base, a.fields_out, kinds=a.kinds, per_kind=a.per_kind)
+    if a.seawall_fig:
+        seawall_figures(a.ensemble_dir, a.base, a.buildings, a.seawall_fig,
+                        kinds=a.kinds, per_kind=a.per_kind)
     return 0
 
 
