@@ -254,7 +254,7 @@ def main(argv=None):
         tr, how = samples, f"validated on a separate ensemble: {', '.join(a.val_ensemble)}"
     else:
         tr, val, how = split(samples, a.holdout_slr, a.holdout_kind,
-                             a.holdout_frac, a.seed)
+                             a.holdout_frac, a.seed, a.holdout_realisation)
 
     if a.limit:
         tr = tr[:a.limit]
