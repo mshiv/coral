@@ -1,0 +1,48 @@
+# Multi-wall seawall systems, 4 m Pin Point. A SEPARATE ensemble from pinpoint_highres_4m.
+#
+# The main decision ensemble places ONE wall per seawall member, which keeps per-wall attribution
+# clean and keeps the holdout-kind seawall test uncontaminated. The tool's premise, though, is a
+# user drawing walls, plural. A model trained only on single walls extrapolates to a system.
+#
+# `seawall_walls` as a LIST draws uniformly from the listed counts, so each system size gets the
+# same number of members. An int would draw 1..N with weights ~1/k, which puts ~7% of members at
+# five walls and leaves the large systems too thin to learn from.
+#
+# 8 SLR levels x 15 = 120 members, ~30 members per system size, ~30 min each.
+#
+#   python -m coral.emulator.sweep --base $CLEAN --out runs/pp4_wallsystems \
+#       --config configs/scenarios/pp4_wallsystems.yaml --nlcd $NLCD
+#   cd $SCR/runs/pp4_wallsystems && THROTTLE=50 bash $CORAL/workflows/slurm/submit_chunks.sh
+name: pp4_wallsystems
+domain:
+  dem:   data/raw/coned_pinpoint_4m_floored.asc
+  bbox:  [-81.1103, -81.0727, 31.9367, 31.9690]
+  res_m: 4
+  ref_point: [-81.0903, 31.9522]
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+  landfall_s: 172800
+lisflood:
+  sim_window_h: [-6, 12]
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
+interventions:
+  kinds: [seawall]
+  seawall_walls: [1, 3, 5, 10]   # uniform over system sizes; 1 is the control
+  slr_levels: [0.0]
+  slr_scenarios: [["Low", 2050], ["IntLow", 2050], ["Int", 2050], ["IntHigh", 2050], ["High", 2050], ["Int", 2100], ["High", 2100]]
+  n_per_kind: 15                 # 8 SLR levels x (1 baseline + 1 kind x 15) = 128 runs
+  include_combos: false
+  focus_radius_km: 3.0
+  seed: 11                       # different from the main ensemble, so alignments differ
+  siting: targeted
+  # Same baseline .max as the main ensemble: siting must rank against the same flood field, and
+  # sweep rejects a flood_depth grid whose shape differs from the DEM.
+  flood_depth: ${PP4}/results_full/res_pinpoint_highres_4m.max
+  wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
+  soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
+  ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
+  buildings:     data/raw/sagis_pinpoint/fema_structures_pinpoint.geojson

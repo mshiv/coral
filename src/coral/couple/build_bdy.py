@@ -367,3 +367,115 @@ if __name__ == "__main__" and "--trim-bdy" in __import__("sys").argv:
     ap.add_argument("--out", default=None, help="default: edit in place")
     a = ap.parse_args()
     trim_bdy_to_zero(a.trim_bdy, a.out)
+
+
+def isolate_bdy(bdy_full, bdy_surge, out, *, keep="tide", z_base=0.42):
+    """Split a surge+tide boundary into one of its two parts.
+
+    The three-run decomposition needs a tide-only and a surge-only boundary on the same grid
+    and the same time vectors as the combined run:
+
+        eta_I(t) = eta_TS(t) - eta_T(t) - eta_S(t)
+
+    keep="tide"  writes eta_T  = eta_full - eta_surge + z_base
+    keep="surge" writes eta_S  = eta_surge - z_base
+
+    Block names, counts and time columns are copied unchanged, so the existing .bci resolves
+    against the result. Both inputs must come from the same nesting, or the blocks will not
+    line up.
+    """
+    fa = pathlib.Path(bdy_full).read_text().splitlines()
+    fb = pathlib.Path(bdy_surge).read_text().splitlines()
+
+    def _index(lines):
+        out, i = {}, 1
+        while i < len(lines):
+            nm = lines[i].strip()
+            if not nm:
+                i += 1; continue
+            n = int(lines[i + 1].split()[0])
+            out[nm] = (lines[i + 1], lines[i + 2:i + 2 + n])
+            i += 2 + n
+        return out
+
+    A, B = _index(fa), _index(fb)
+    res, missing = [fa[0]], 0
+    for nm, (hdr, rows) in A.items():
+        if nm not in B or len(B[nm][1]) != len(rows):
+            missing += 1
+            res += [nm, hdr] + rows          # no counterpart: copy unchanged
+            continue
+        new = []
+        for ra, rb in zip(rows, B[nm][1]):
+            va, ta = float(ra.split()[0]), ra.split()[1]
+            vb = float(rb.split()[0])
+            v = (va - vb + z_base) if keep == "tide" else (vb - z_base)
+            new.append(f"{v:.4f}\t{ta}\t")
+        res += [nm, hdr] + new
+    pathlib.Path(out).write_text("\n".join(res) + "\n")
+    print(f"{keep}-only boundary: {len(A)} blocks -> {out}"
+          + (f"  ({missing} block(s) had no counterpart and were copied unchanged)" if missing else ""))
+    return out
+
+
+def shift_tide(bdy_full, bdy_surge, out, *, shift_s, z_base=0.42):
+    """Re-time the tidal part of a boundary, keeping the surge fixed.
+
+    Answers the design question: what would this event have done if high water had fallen at the
+    surge peak? The tide is recovered as (full - surge + z_base), shifted in time, and added back.
+    Times outside the record are held at the nearest sample, which is safe for a shift of a few
+    hours on a multi-day series.
+    """
+    import numpy as _np
+    fa = pathlib.Path(bdy_full).read_text().splitlines()
+    fb = pathlib.Path(bdy_surge).read_text().splitlines()
+
+    def _index(lines):
+        out, i = {}, 1
+        while i < len(lines):
+            nm = lines[i].strip()
+            if not nm:
+                i += 1; continue
+            n = int(lines[i + 1].split()[0])
+            out[nm] = (lines[i + 1], lines[i + 2:i + 2 + n])
+            i += 2 + n
+        return out
+
+    A, B = _index(fa), _index(fb)
+    res = [fa[0]]
+    for nm, (hdr, rows) in A.items():
+        if nm not in B or len(B[nm][1]) != len(rows):
+            res += [nm, hdr] + rows; continue
+        t = _np.array([float(r.split()[1]) for r in rows])
+        va = _np.array([float(r.split()[0]) for r in rows])
+        vb = _np.array([float(r.split()[0]) for r in B[nm][1]])
+        tide = va - vb + z_base
+        tide_shift = _np.interp(t - shift_s, t, tide)      # ends held, not wrapped
+        # surge residual (vb - z_base) plus the re-timed tide
+        new = [f"{vb[k] - z_base + tide_shift[k]:.4f}\t{t[k]:.1f}\t" for k in range(len(t))]
+        res += [nm, hdr] + new
+    pathlib.Path(out).write_text("\n".join(res) + "\n")
+    print(f"tide shifted by {shift_s/3600:+.2f} h -> {out}")
+    return out
+
+
+if __name__ == "__main__" and "--isolate" in __import__("sys").argv:
+    import argparse
+    ap = argparse.ArgumentParser(description="Split a surge+tide .bdy into tide-only or surge-only")
+    ap.add_argument("--isolate", choices=["tide", "surge"], required=True)
+    ap.add_argument("--full", required=True); ap.add_argument("--surge", required=True)
+    ap.add_argument("--z-base", type=float, default=0.42)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    isolate_bdy(a.full, a.surge, a.out, keep=a.isolate, z_base=a.z_base)
+
+
+if __name__ == "__main__" and "--shift-tide" in __import__("sys").argv:
+    import argparse
+    ap = argparse.ArgumentParser(description="Shift the tidal part of a .bdy in time")
+    ap.add_argument("--shift-tide", type=float, required=True, help="seconds; + delays the tide")
+    ap.add_argument("--full", required=True); ap.add_argument("--surge", required=True)
+    ap.add_argument("--z-base", type=float, default=0.42)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    shift_tide(a.full, a.surge, a.out, shift_s=a.shift_tide, z_base=a.z_base)
