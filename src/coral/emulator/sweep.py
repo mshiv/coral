@@ -49,14 +49,24 @@ def apply_slr_to_bdy(bdy_in, bdy_out, slr_m):
 _WALL_STRIDE = 1009
 
 
-def _sample_wall_count(rng, max_walls):
-    """Draw 1..max_walls, weighted toward few walls (weights ~ 1/k).
+def _sample_wall_count(rng, walls):
+    """How many walls this member gets.
 
-    The marsh peninsula has finite tie-in ground, and the buildings a wall can shelter saturate
-    after two or three lines, so the mass sits on the small end. The long tail still matters:
-    user-drawn multi-wall systems are the tool's premise, so the emulator must see big systems.
+    `walls` is an int or a list of ints, and the two give different ensembles:
+
+    int N   draws 1..N with weights ~ 1/k. The mass sits on few walls, which matches the site:
+            the peninsula has finite tie-in ground and the buildings a wall shelters saturate
+            after two or three lines. The tail is thin, so large systems are rare.
+    list    draws uniformly from the listed counts. Every count gets the same number of members,
+            so a system of ten walls is as well represented as a single wall. Use this to teach
+            the emulator wall systems, where the 1/k tail leaves too few large cases.
     """
-    ks = np.arange(1, max_walls + 1)
+    if isinstance(walls, (list, tuple)):
+        ks = np.asarray([int(w) for w in walls if int(w) >= 1])
+        if ks.size == 0:
+            return 1
+        return int(rng.choice(ks))
+    ks = np.arange(1, int(walls) + 1)
     return int(rng.choice(ks, p=(1.0 / ks) / (1.0 / ks).sum()))
 
 
