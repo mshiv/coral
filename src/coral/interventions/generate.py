@@ -120,8 +120,18 @@ def patch_mask(shape, corr_len=30.0, area_frac=0.15, seed=0, restrict=None):
 
 # intervention registry: kind maps to knob ranges used by sample_intervention
 
+_CONTOUR_CACHE = {}
+_CONTOUR_CACHE_MAX = 4
+
+
 def shoreline_contour(dem, sea_level=0.81, min_len=50):
     """Shoreline polylines: contours of the DEM at the water level, longest first.
+
+    Cached on the DEM contents and water level. A wall alignment is retried up to 12 times to
+    find a tie-in, and the DEM does not change between retries, so without this a ten-wall
+    member runs marching squares over the full grid up to 120 times for at most 10 distinct
+    results. The cache holds a few entries because the DEM does change after each wall is
+    burned in.
 
     A seawall is a linear structure on an alignment, not a band of raised ground. Extracting the
     zero-level contour gives that alignment from the terrain itself, and it is also what a user
@@ -130,6 +140,10 @@ def shoreline_contour(dem, sea_level=0.81, min_len=50):
     Returns a list of (row, col) float arrays in grid coordinates.
     """
     from scipy import ndimage
+    key = (dem.shape, float(sea_level), int(min_len), hash(dem.tobytes()))
+    hit = _CONTOUR_CACHE.get(key)
+    if hit is not None:
+        return list(hit)
     z = np.where(np.isfinite(dem), dem, sea_level - 10.0)
     try:
         from skimage import measure
@@ -151,7 +165,11 @@ def shoreline_contour(dem, sea_level=0.81, min_len=50):
                 break
             order.append(k); used.add(k)
         cs = [pts[order]]
-    return sorted(cs, key=len, reverse=True)
+    cs = sorted(cs, key=len, reverse=True)
+    while _CONTOUR_CACHE and len(_CONTOUR_CACHE) >= _CONTOUR_CACHE_MAX:
+        _CONTOUR_CACHE.pop(next(iter(_CONTOUR_CACHE)))
+    _CONTOUR_CACHE[key] = cs
+    return list(cs)
 
 
 def _extend_to_tie_in(arc, run, dem, tie_elev, max_extend_cells=200):
