@@ -23,7 +23,7 @@ coupling:
   landfall_utc: "2016-10-08T13:00:00"
   landfall_s: 172800
 lisflood:
-  sim_window_h: [-6, 12]
+  sim_window_h: [-6, 18]   # MUST match the decision ensemble or the two are not comparable
 forcing:
   rainfall: aorc
   rain_mode: uniform
@@ -41,7 +41,9 @@ interventions:
   siting: targeted
   # Same baseline .max as the main ensemble: siting must rank against the same flood field, and
   # sweep rejects a flood_depth grid whose shape differs from the DEM.
-  flood_depth: ${PP4}/results_full/res_pinpoint_highres_4m.max
+  # Same symlinked baseline the decision ensemble used, so placements rank against
+  # identical bytes regardless of what later overwrote results_full.
+  flood_depth: ${CLEAN}/res_pinpoint_highres_4m.max
   wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
   soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
   ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
