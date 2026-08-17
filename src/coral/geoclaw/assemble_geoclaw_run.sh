@@ -40,7 +40,12 @@ fi
 # 3. install the finalized setrun.py (gauges + flagregion already inlined)
 cp templates/setrun.py "$DEST/setrun.py"
 
-# 4. regenerate the .data files from the new setrun.py
+# 4. regenerate the .data files from the new setrun.py. setrun reads the scenario, so pass it
+#    through: without it setrun falls back to a path under $CORAL, and if that is unset the
+#    load fails rather than quietly using defaults.
+: "${CORAL_SCENARIO:=$PWD/configs/scenarios/savannah_matthew_compound.yaml}"
+export CORAL_SCENARIO
+echo "scenario: $CORAL_SCENARIO"
 ( cd "$DEST" && make .data )
 
 # 5. verify (gauge count is dynamic: coupling gauges + any dense obs gauges from

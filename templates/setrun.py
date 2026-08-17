@@ -23,8 +23,14 @@ import numpy as np
 _CFG = None
 try:
     from coral import config as _coral_config
-    _CFG = _coral_config.load(os.environ.get(
-        "CORAL_SCENARIO", "configs/scenarios/savannah_matthew_tide.yaml"))
+    # CORAL_SCENARIO wins. Otherwise fall back to a path under $CORAL, because setrun runs
+    # from the run directory and a relative default resolves against that instead of the repo.
+    _sc = os.environ.get("CORAL_SCENARIO")
+    if not _sc:
+        _root = os.environ.get("CORAL", "")
+        _sc = os.path.join(_root, "configs", "scenarios",
+                           "savannah_matthew_compound.yaml")
+    _CFG = _coral_config.load(_sc)
     print("setrun: scenario %s, sea_level %.2f, amr_max %d"
           % (_CFG.name, _CFG.geoclaw.sea_level, _CFG.geoclaw.amr_max))
 except Exception as _e:
