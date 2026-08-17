@@ -16,6 +16,20 @@ import gzip
 
 import numpy as np
 
+# Scenario config, so sea level, AMR depth and the refine box come from the same yaml the
+# LISFLOOD side reads. Set CORAL_SCENARIO to point at a different one. If coral is not on the
+# path -- setrun runs inside the clawpack environment, which may not have it -- the run
+# continues on the defaults below and says so, rather than dying at make .data.
+_CFG = None
+try:
+    from coral import config as _coral_config
+    _CFG = _coral_config.load(os.environ.get(
+        "CORAL_SCENARIO", "configs/scenarios/savannah_matthew_tide.yaml"))
+    print("setrun: scenario %s, sea_level %.2f, amr_max %d"
+          % (_CFG.name, _CFG.geoclaw.sea_level, _CFG.geoclaw.amr_max))
+except Exception as _e:
+    print("setrun: no scenario config (%s); using the values written in this file" % _e)
+
 from clawpack.geoclaw.surge.storm import Storm
 from clawpack.geoclaw import topotools
 import clawpack.clawutil as clawutil
@@ -270,13 +284,22 @@ def setrun(claw_pkg='geoclaw'):
     # amrdata.memsize = 16777212
 
     # max number of refinement levels:
-    amrdata.amr_levels_max = 6
+    # Level 6 is about 145 m, coarse for a boundary feeding a 4 m nest. A seventh at ratio 4
+    # gives about 36 m, and applies only inside refine_box; level 7 across the domain costs a
+    # great deal and improves nothing offshore.
+    amrdata.amr_levels_max = _CFG.geoclaw.amr_max if _CFG else 7
 
     # List of refinement ratios at each level (length at least amr_max_levels-1)
     # ratios start at level 2 (ratio 4 is to get from level 5 to level 6)
-    amrdata.refinement_ratios_x = [2, 2, 2, 6, 4]
-    amrdata.refinement_ratios_y = [2, 2, 2, 6, 4]
-    amrdata.refinement_ratios_t = [2, 2, 2, 6, 4]
+    # One ratio per step, so the list has to be amr_max - 1 long. Sliced from the full ladder
+    # rather than written out, so changing amr_max in the scenario is enough to run the
+    # convergence test at level 6 against level 7.
+    #   0.25 deg -> 13.9 km -> 6.9 km -> 3.5 km -> 578 m -> 145 m -> 36 m
+    _RATIOS = [2, 2, 2, 6, 4, 4]
+    _r = _RATIOS[:amrdata.amr_levels_max - 1]
+    amrdata.refinement_ratios_x = list(_r)
+    amrdata.refinement_ratios_y = list(_r)
+    amrdata.refinement_ratios_t = list(_r)
 
     # Specify type of each aux variable in amrdata.auxtype.
     # This must be a list of length maux, each element of which is one of:
@@ -328,8 +351,10 @@ def setrun(claw_pkg='geoclaw'):
 
     # Pin Point / Savannah coupling box -- force finest level (6, ~145 m) ONLY here.
     # Everything else stays coarse; the surge wave self-refines en route (wave_tolerance=1.0).
-    regions.append([6, 6, rundata.clawdata.t0, rundata.clawdata.tfinal,
-                    -81.111, -80.819, 31.804, 32.100])  # x1,x2,y1,y2 = gauge bbox + margin
+    _lvl = _CFG.geoclaw.amr_max if _CFG else 7
+    _box = list(_CFG.geoclaw.refine_box) if (_CFG and _CFG.geoclaw.refine_box) \
+        else [-81.111, -80.819, 31.804, 32.100]
+    regions.append([_lvl, _lvl, rundata.clawdata.t0, rundata.clawdata.tfinal, *_box])
 
     # append as many flagregions as desired to this list:
     flagregions = rundata.flagregiondata.flagregions
@@ -445,6 +470,21 @@ def setrun(claw_pkg='geoclaw'):
     # Wilmington, NC - 8658120
     rundata.gaugedata.gauges.append([68, -77.953000, 34.226667, rundata.clawdata.t0, rundata.clawdata.tfinal])
 
+    # Observation gauges along the Pin Point shoreline, read from a file so the coupling block
+    # above stays as it is. IDs start at 100, so bc1..bc63 and the NOAA stations at 64..68 keep
+    # their numbers and the sorting script is unaffected.
+    #
+    #   python -m coral.geoclaw.make_gauges --spacing-m 100 --seaward-cells 3
+    obs_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'obs_gauges.txt')
+    if os.path.exists(obs_file):
+        pts = np.loadtxt(obs_file, ndmin=2)
+        for i, (gx, gy) in enumerate(pts[:, :2]):
+            rundata.gaugedata.gauges.append([100 + i, float(gx), float(gy),
+                                             rundata.clawdata.t0, rundata.clawdata.tfinal])
+        print('setrun: added %d observation gauges from %s' % (len(pts), obs_file))
+    else:
+        print('setrun: no obs_gauges.txt, running with the coupling and NOAA gauges only')
+
     # Force the gauges to also record the wind and pressure fields
     # rundata.gaugedata.aux_out_fields = [4, 5, 6]
 
@@ -483,7 +523,10 @@ def setgeo(rundata):
     # == Algorithm and Initial Conditions ==
     # Note that in the original paper due to gulf summer swelling this was set
     # to 0.28
-    geo_data.sea_level = 0.81
+    # From the scenario, so this cannot drift from what the LISFLOOD side was told. 0.0 puts
+    # the tide in the boundary series rather than the datum; with it in the datum, eta in every
+    # fort.q carries the same offset and the surge cannot be read as an anomaly.
+    geo_data.sea_level = _CFG.geoclaw.sea_level if _CFG else 0.0
     geo_data.dry_tolerance = 1.e-2
 
     # Refinement Criteria

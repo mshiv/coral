@@ -11,7 +11,8 @@ domain:
   res_m: 30
   ref_point: [-81.0903, 31.9522]
 geoclaw:
-  sea_level: 0.0        # MSL -> pure surge residual (needs a GeoClaw rerun at MSL)
+  sea_level: 0.0        # MSL -> pure surge residual; the tide enters through the .bdy
+  amr_max: 7            # ~36 m inside refine_box; level 6 is ~145 m, coarse for a 4 m nest
   refine_box: [-81.111, -80.819, 31.804, 32.100]
 coupling:
   landfall_utc: "2016-10-08T13:00:00"

@@ -6,7 +6,8 @@
 #   bash scripts/assemble_geoclaw_run.sh  ~/path/to/matthew_2016_MSLtide_0.81
 #
 # Result: ./geoclaw_run ready to `make .data && make .output`.
-# Your finalized geoclaw/setrun.py already has the 68 gauges + L6 flagregion
+# templates/setrun.py has the 63 coupling gauges + 5 NOAA stations inlined and the Pin Point
+# box at level 7. Observation gauges come from obs_gauges.txt in the run dir, if present.
 # inlined, so nothing else needs editing.
 
 set -euo pipefail
@@ -16,8 +17,8 @@ DEST="geoclaw_run"
 if [ ! -f "$MATTHEW/setrun.py" ]; then
     echo "ERROR: $MATTHEW doesn't look like a GeoClaw run (no setrun.py)"; exit 1
 fi
-if [ ! -f geoclaw/setrun.py ]; then
-    echo "ERROR: run from the repo root (geoclaw/setrun.py not found)"; exit 1
+if [ ! -f templates/setrun.py ]; then
+    echo "ERROR: run from the repo root (templates/setrun.py not found)"; exit 1
 fi
 
 # 1. copy the base run WITHOUT the heavy/derived bits
@@ -28,7 +29,7 @@ rsync -a --exclude='_output' --exclude='_plots' --exclude='scratch' \
 ln -sfn "$(cd "$MATTHEW/scratch" && pwd)" "$DEST/scratch"
 
 # 3. install the finalized setrun.py (gauges + flagregion already inlined)
-cp geoclaw/setrun.py "$DEST/setrun.py"
+cp templates/setrun.py "$DEST/setrun.py"
 
 # 4. regenerate the .data files from the new setrun.py
 ( cd "$DEST" && make .data )
