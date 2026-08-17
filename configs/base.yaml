@@ -2,8 +2,12 @@
 geoclaw:
   storm: matthew
   drag: garratt
-  sea_level: 0.81
-  amr_max: 6
+  # 0.0 since the 2026-08-17 rebuild. GeoClaw runs once and returns the pure surge residual;
+  # the tide is superposed in the .bdy by build_bdy. Putting the tide in the datum offset eta
+  # in every fort.q and made the surge unreadable as an anomaly. savannah_matthew_LR keeps
+  # 0.81 as the historical static-tide comparison.
+  sea_level: 0.0
+  amr_max: 7
 coupling:
   gauge_spacing_m: 400
   seaward_cells: 3

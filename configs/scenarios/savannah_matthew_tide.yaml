@@ -16,9 +16,7 @@ domain:
   res_m: 30
   ref_point: [-81.0903, 31.9522]
 geoclaw:
-  sea_level: 0.0        # MSL -> pure surge residual; the tide enters through the .bdy
-  amr_max: 7            # ~36 m inside refine_box; level 6 is ~145 m, coarse for a 4 m nest
-  refine_box: [-81.111, -80.819, 31.804, 32.100]
+  refine_box: [-81.150, -80.800, 31.680, 32.244]   # gauge bbox + margin, 436 points
 coupling:
   landfall_utc: "2016-10-08T13:00:00"
 # Parked. A 180 h window ([-30, 150], 86400-691200 s) was tried for river discharge, but it

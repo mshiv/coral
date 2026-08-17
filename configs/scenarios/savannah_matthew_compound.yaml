@@ -12,7 +12,7 @@ domain:
   res_m: 30
   ref_point: [-81.0903, 31.9522]
 geoclaw:
-  refine_box: [-81.111, -80.819, 31.804, 32.100]
+  refine_box: [-81.150, -80.800, 31.680, 32.244]   # gauge bbox + margin, 436 points
 coupling:
   landfall_utc: "2016-10-08T13:00:00"   # GeoClaw t=0 (Matthew closest approach, Savannah)
 forcing:
