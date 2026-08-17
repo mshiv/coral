@@ -182,6 +182,8 @@ def main():
                                 if _c.manning.water_level is not None else _c.datums.mhw)
         else:
             args.water_level = 0.81
+    print(f"water level {args.water_level:.3f} m (unmapped cells below this get n="
+          f"{args.water_n})")
 
     classes, z = classes_on_dem(args.nlcd, args.dem)
     H, W = classes.shape
@@ -191,6 +193,12 @@ def main():
         nwi_types = nwi_types_on_dem(args.nwi, args.dem)
         n, n_changed = apply_nwi_overlay(n, nwi_types)
         print(f"NWI overlay ({args.nwi}): {n_changed:,} cells refined to marsh/wetland n")
+    unmapped = ~np.isin(classes, list(NLCD_N)) & np.isfinite(z)
+    band = int((unmapped & (z > min(0.81, args.water_level))
+                & (z <= max(0.81, args.water_level))).sum())
+    if band or args.water_level != 0.81:
+        print(f"  unmapped cells between 0.81 and {args.water_level:.3f} m: {band:,} "
+              f"-- the only cells a change of threshold can move")
     found = {c: int((classes == c).sum()) for c in NLCD_N if (classes == c).any()}
     write_ascii(args.out, n, args.dem, nodata=-9999)
     mapped = np.isin(classes, list(NLCD_N))
