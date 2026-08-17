@@ -13,7 +13,7 @@ license = {text = "MIT"}
 dependencies = [
     "numpy", "scipy", "xarray", "zarr", "rasterio", "rioxarray",
     "matplotlib", "contextily", "pyproj", "requests",
-    "pyyaml", "jinja2", "hydra-core", "typer",
+    "pyyaml", "jinja2", "typer",
     "s3fs", "pandas",   # AORC rainfall fetch (anonymous S3 Zarr) + time handling
 ]
 
