@@ -51,6 +51,11 @@ def main():
                     help="if set, also emit dense observation gauges every N m along the coast")
     ap.add_argument("--obs-seaward-cells", type=int, default=2,
                     help="snap each obs gauge to the nearest ocean cell within this radius")
+    ap.add_argument("--trend-window-m", type=float, default=6000.0,
+                    help="alongshore window for the shoreline trend used to reject inlet "
+                         "excursions")
+    ap.add_argument("--trend-tol-m", type=float, default=800.0,
+                    help="how far west of the trend a row may sit before it is pulled back")
     ap.add_argument("--coast-min-len-m", type=float, default=500.0,
                     help="drop shoreline fragments shorter than this")
     args = ap.parse_args()
@@ -93,19 +98,54 @@ def main():
     openocean = (lbl == (1 + int(np.argmax(sizes))))
 
     # per latitude band: outermost ocean->land transition, nudged seaward (east)
-    pts = []
-    for r in range(0, ny, step):
+    #
+    # The walk west stops at the first non-ocean cell. At an inlet there is none: the open
+    # ocean runs continuously through the mouth into the sound, so the walk carries on until
+    # it hits land far inland. On this coast that happens at the Savannah River mouth, Wassaw
+    # Sound and Ossabaw Sound, and the gauge lands kilometres inside the estuary.
+    #
+    # A seaward front crosses an inlet mouth rather than entering it, and the rows either side
+    # already say where the coast is. So the shoreline column is found for every row first,
+    # then rows that sit far west of their neighbours are pulled back to the local trend.
+    shore_cols = np.full(ny, -1, dtype=int)
+    for r in range(ny):
         if not openocean[r].any():
             continue
-        cmax = np.where(openocean[r])[0].max()
-        c = cmax
+        c = int(np.where(openocean[r])[0].max())
         while c > 0 and openocean[r, c]:
             c -= 1
-        shore_c = c + 1
+        shore_cols[r] = c + 1
+
+    valid = shore_cols >= 0
+    trend = np.array(shore_cols, dtype=float)
+    trend[~valid] = np.nan
+    if valid.any():
+        win = max(3, int(round(args.trend_window_m / cell_m)) | 1)
+        filled = np.where(valid, shore_cols, np.nan)
+        idx = np.arange(ny)
+        filled = np.interp(idx, idx[valid], np.asarray(shore_cols)[valid])
+        # Maximum, not median. The front is the most seaward shoreline in the neighbourhood,
+        # and every inlet excursion is westward, so a maximum ignores them however wide the
+        # inlet is. A median still sits inside a sound that spans more than half the window,
+        # which is what happens at the Savannah River mouth.
+        trend = ndimage.maximum_filter(filled, size=win, mode="nearest")
+    tol = max(1, int(round(args.trend_tol_m / cell_m)))
+
+    pts, pulled = [], 0
+    for r in range(0, ny, step):
+        if shore_cols[r] < 0:
+            continue
+        shore_c = shore_cols[r]
+        floor_c = int(round(trend[r])) - tol          # west of this is an inlet excursion
+        if shore_c < floor_c:
+            shore_c = floor_c
+            pulled += 1
         g = min(nx - 1, shore_c + args.seaward_cells)
-        if openocean[r, g]:
+        if 0 <= g < nx and openocean[r, g]:
             lon, lat = xy(tr, r, g)
             pts.append((lon, lat))
+    if pulled:
+        print(f"{pulled} rows pulled back to the alongshore trend (inlet mouths)")
     if not pts:
         raise SystemExit("no seaward-front points found")
     print(f"{len(pts)} seaward-front points, "
