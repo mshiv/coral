@@ -28,8 +28,9 @@ def _norm(a):
 
 
 def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=None,
-                      flood_depth=None, flood_zone=None, classes=None, soil_ksat=None,
-                      focus=None, mhw=0.94, mlw=-1.17, slr_buffer=0.5, res_m=30.0):
+                      roads=None, flood_depth=None, flood_zone=None, classes=None,
+                      soil_ksat=None, focus=None, mhw=0.94, mlw=-1.17, slr_buffer=0.5,
+                      res_m=30.0):
     """Per-cell suitability in [0,1] for `kind`; 0 outside its zone. Higher = better target."""
     from scipy import ndimage
     def _win(metres, minimum=3):        # metres to an odd cell window for the filters below
@@ -40,8 +41,11 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
     s = np.zeros(dem.shape, "float64")
     NLCD_DEV = (21, 22, 23, 24); NLCD_IMP = (22, 23, 24)
 
-    if kind == "marsh":
-        # migration space: land landward-adjacent to existing marsh, within [MHW, MHW+SLR]
+    if kind == "marsh_migration":
+        # Migration space: land landward-adjacent to existing marsh, within [MHW, MHW+SLR].
+        # slr_buffer must be the member's own rise, not a constant. Migration space is defined
+        # by how far the tide advances, so a fixed 0.5 m gave a Low2050 member and a High2100
+        # member the same corridor.
         band = land & (dem >= mhw) & (dem <= mhw + slr_buffer)
         if classes is not None:
             band = band & ~np.isin(classes, NLCD_DEV)
@@ -81,6 +85,19 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
         else:
             s = np.where(zone, _norm(-dem), 0.0)
 
+    elif kind == "road_raise":
+        # Road cells the modelled peak reaches. Raising a road that never floods buys nothing,
+        # and without a road layer there is no alignment to raise, so score nothing.
+        if roads is None:
+            return s
+        band = roads & np.isfinite(dem)
+        if flood_depth is not None:
+            wet = np.isfinite(flood_depth) & (flood_depth > 0.05)
+            band = band & wet
+            s = np.where(band, _norm(np.where(band, flood_depth, 0.0)), 0.0)
+        else:
+            s = np.where(band, _norm(-(dem)), 0.0)      # lowest road first
+
     elif kind == "seawall":
         shore = ndimage.binary_dilation(sea, iterations=max(1,int(round(60.0/res_m)))) & land
         landward_flood = ndimage.maximum_filter(flood_depth, size=_win(450.0)) if flood_depth is not None else np.zeros(dem.shape)
@@ -93,6 +110,23 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
     if focus is not None:
         s = np.where(focus, s, 0.0)
     return s
+
+
+def intertidal_mask(dem, *, mlw=-1.17, mhw=0.94, slr_buffer=0.5, nlcd=None, nwi=None):
+    """Marsh footprint from the tidal frame, filtered by land cover.
+
+    Neither land-cover source works alone here. NWI maps 2.4% of the Pin Point clip as
+    estuarine wetland and NLCD maps 52.5%, a twentyfold disagreement, so NWI under-maps and
+    NLCD over-maps. The DEM is the better measurement at 4 m, so the tidal band sets the extent
+    and land cover only says which of those cells carry vegetation.
+    """
+    band = np.isfinite(dem) & (dem >= mlw) & (dem <= mhw + slr_buffer)
+    veg = None
+    if nlcd is not None:
+        veg = np.isin(np.round(nlcd), (90, 95))          # woody and emergent herbaceous wetland
+    if nwi is not None:
+        veg = nwi if veg is None else (veg | nwi)
+    return band if veg is None else (band & veg)
 
 
 def targeted_mask(dem, kind, area_frac, *, close_iter=1, **drivers):
