@@ -43,6 +43,16 @@ fi
 cp templates/setrun.py "$DEST/setrun.py"
 cp templates/kml2slu.py "$DEST/kml2slu.py"
 
+# 3b. the coupling gauges. setrun reads boundary_points.csv from the run directory and refuses
+#     to build without it, since a GeoClaw run with no coupling gauges produces no boundary.
+GAUGES="${CORAL_GAUGES:-inputs/boundary_points.csv}"
+if [ -f "$GAUGES" ]; then
+    cp "$GAUGES" "$DEST/boundary_points.csv"
+    echo "gauges: $(( $(wc -l < "$GAUGES") - 1 )) coupling points from $GAUGES"
+else
+    echo "ERROR: $GAUGES not found. Run gen_boundary_points first, or set CORAL_GAUGES."; exit 1
+fi
+
 # 4. regenerate the .data files from the new setrun.py. setrun reads the scenario, so pass it
 #    through: without it setrun falls back to a path under $CORAL, and if that is unset the
 #    load fails rather than quietly using defaults.
