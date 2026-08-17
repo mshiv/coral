@@ -391,104 +391,43 @@ def setrun(claw_pkg='geoclaw'):
         flagregions.append(flagregion)
 
     # == setgauges.data values ==
-    # for gauges append lines of the form  [gaugeno, x, y, t1, t2]
-    # === Savannah/Pin Point coupling gauges (bc1..bc63) ===
-    # --- Savannah seaward-front gauges (auto) ---
-    rundata.gaugedata.gauges.append([1, -80.882657, 32.079923, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([2, -80.884721, 32.075794, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([3, -80.886196, 32.071665, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([4, -80.890325, 32.067536, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([5, -80.894159, 32.063407, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([6, -80.866436, 32.059278, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([7, -80.900352, 32.055149, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([8, -80.913623, 32.051020, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([9, -80.905956, 32.046891, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([10, -80.890620, 32.042762, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([11, -80.887670, 32.038634, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([12, -80.910674, 32.034505, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([13, -80.877348, 32.030376, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([14, -80.846381, 32.026247, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([15, -80.840188, 32.022118, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([16, -80.839598, 32.017989, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([17, -80.839008, 32.013860, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([18, -80.838714, 32.009731, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([19, -80.839008, 32.005602, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([20, -80.840188, 32.001473, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([21, -80.841663, 31.997345, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([22, -80.843727, 31.993216, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([23, -80.845792, 31.989087, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([24, -80.861128, 31.984958, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([25, -80.855229, 31.980829, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([26, -80.861717, 31.976700, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([27, -80.862602, 31.972571, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([28, -80.866436, 31.968442, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([29, -80.876168, 31.964313, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([30, -80.881477, 31.960185, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([31, -80.887081, 31.956056, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([32, -80.892684, 31.951927, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([33, -80.897403, 31.947798, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([34, -80.903006, 31.943669, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([35, -80.983225, 31.939540, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([36, -80.988239, 31.935411, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([37, -80.996496, 31.931282, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([38, -80.983815, 31.927153, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([39, -80.973787, 31.923024, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([40, -80.970543, 31.918896, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([41, -80.966414, 31.914767, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([42, -80.936332, 31.910638, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([43, -80.936332, 31.906509, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([44, -80.940461, 31.902380, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([45, -80.944295, 31.898251, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([46, -80.948424, 31.894122, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([47, -80.954028, 31.889993, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([48, -80.959631, 31.885864, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([49, -80.964940, 31.881736, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([50, -80.969953, 31.877607, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([51, -80.975262, 31.873478, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([52, -80.979686, 31.869349, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([53, -80.983225, 31.865220, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([54, -80.987649, 31.861091, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([55, -80.993547, 31.856962, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([56, -81.059609, 31.852833, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([57, -81.060789, 31.848704, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([58, -81.090576, 31.844575, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([59, -81.078779, 31.840447, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([60, -81.076715, 31.836318, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([61, -81.081139, 31.832189, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([62, -81.072586, 31.828060, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    rundata.gaugedata.gauges.append([63, -81.039850, 31.823931, rundata.clawdata.t0, rundata.clawdata.tfinal])
-
-    # --- NOAA validation gauges (renumbered 64-68; not in .bci -> harmless 'unreferenced') ---
-    # Mayport (Bar Pilots Dock), FL - 8720218
-    rundata.gaugedata.gauges.append([64, -81.427915, 30.398600, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    # Fort Pulaski, GA - 8670870  (KEY Savannah validation gauge)
-    rundata.gaugedata.gauges.append([65, -80.903052, 32.034668, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    # Charleston, Cooper River Entrance, SC - 8665530
-    rundata.gaugedata.gauges.append([66, -79.923646, 32.780783, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    # Wrightsville Beach, NC - 8658163
-    rundata.gaugedata.gauges.append([67, -77.786275, 34.213270, rundata.clawdata.t0, rundata.clawdata.tfinal])
-    # Wilmington, NC - 8658120
-    rundata.gaugedata.gauges.append([68, -77.953000, 34.226667, rundata.clawdata.t0, rundata.clawdata.tfinal])
-
-    # Observation gauges along the Pin Point shoreline, read from a file so the coupling block
-    # above stays as it is. IDs start at 100, so bc1..bc63 and the NOAA stations at 64..68 keep
-    # their numbers and the sorting script is unaffected.
     #
-    #   python -m coral.preprocess.gen_boundary_points --dem <30 m DEM> \
-    #       --config configs/scenarios/savannah_matthew_tide.yaml --obs-spacing-m 100
+    # Coupling gauges come from boundary_points.csv, written by gen_boundary_points alongside
+    # the .bci. They were inlined until the spacing went from 400 m to 100 m and the count from
+    # 63 to 436, at which point pasting them in was no longer reasonable -- and an inlined block
+    # that drifts from the .bci is a boundary that silently does not match its own forcing.
     #
-    # Numbered from 100 rather than from the id in the file. gen_boundary_points continues its
-    # own numbering from the coupling count, which is 64 here and would land on the NOAA
-    # stations at 64-68.
-    obs_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'obs_gauges.csv')
-    if os.path.exists(obs_file):
-        pts = np.atleast_2d(np.genfromtxt(obs_file, delimiter=',', skip_header=1))
-        for i, row in enumerate(pts):
-            rundata.gaugedata.gauges.append([100 + i, float(row[1]), float(row[2]),
+    #   cd inputs && python -m coral.preprocess.gen_boundary_points \
+    #       --dem <30 m DEM> --config configs/scenarios/savannah_matthew_tide.yaml \
+    #       --spacing-m 100
+    #
+    # IDs are 1..N and must stay in the file's order, because build_bdy matches gauge N to bcN.
+    gauge_csv = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             'boundary_points.csv')
+    n_coupling = 0
+    if os.path.exists(gauge_csv):
+        rows = np.atleast_2d(np.genfromtxt(gauge_csv, delimiter=',', skip_header=1,
+                                           usecols=(0, 2, 3)))
+        for gid, glon, glat in rows:
+            rundata.gaugedata.gauges.append([int(gid), float(glon), float(glat),
                                              rundata.clawdata.t0, rundata.clawdata.tfinal])
-        print('setrun: added %d observation gauges from %s' % (len(pts), obs_file))
+        n_coupling = len(rows)
+        print('setrun: %d coupling gauges from %s' % (n_coupling, gauge_csv))
     else:
-        print('setrun: no obs_gauges.csv, running with the coupling and NOAA gauges only')
+        raise SystemExit('setrun: %s not found. Run gen_boundary_points first; without the '
+                         'coupling gauges there is no boundary.' % gauge_csv)
+
+    # NOAA validation stations, at 9001+ so they cannot collide with the coupling range however
+    # many gauges that becomes. Not in the .bci, so they show as unreferenced and are ignored.
+    for gid, glon, glat, label in (
+            (9001, -81.427915, 30.398600, 'Mayport FL 8720218'),
+            (9002, -80.903052, 32.034668, 'Fort Pulaski GA 8670870'),
+            (9003, -79.923646, 32.780783, 'Charleston SC 8665530'),
+            (9004, -77.786275, 34.213270, 'Wrightsville Beach NC 8658163'),
+            (9005, -77.953000, 34.226667, 'Wilmington NC 8658120')):
+        rundata.gaugedata.gauges.append([gid, glon, glat,
+                                         rundata.clawdata.t0, rundata.clawdata.tfinal])
+    print('setrun: 5 NOAA stations at 9001-9005 (Fort Pulaski is 9002)')
 
     # Force the gauges to also record the wind and pressure fields
     # rundata.gaugedata.aux_out_fields = [4, 5, 6]
