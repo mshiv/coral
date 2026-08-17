@@ -25,8 +25,17 @@ fi
 rsync -a --exclude='_output' --exclude='_plots' --exclude='scratch' \
       --exclude='*.data' "$MATTHEW"/ "$DEST"/
 
-# 2. reuse topo via symlink (avoids duplicating ~1.3 GB)
-ln -sfn "$(cd "$MATTHEW/scratch" && pwd)" "$DEST/scratch"
+# 2. reuse topo via symlink when the source case has it, so the ~80 MB of CRM and GEBCO is
+#    not duplicated per run. When it does not, make an empty one: setrun downloads GEBCO, CRM
+#    vol2 and the ATCF track into scratch/ on the first `make .data`, which needs a login node
+#    because compute nodes usually have no outbound network.
+if [ -d "$MATTHEW/scratch" ]; then
+    ln -sfn "$(cd "$MATTHEW/scratch" && pwd)" "$DEST/scratch"
+    echo "topo: symlinked $MATTHEW/scratch"
+else
+    mkdir -p "$DEST/scratch"
+    echo "topo: no scratch/ in $MATTHEW -- setrun will download it on the first make .data"
+fi
 
 # 3. install the finalized setrun.py (gauges + flagregion already inlined)
 cp templates/setrun.py "$DEST/setrun.py"
