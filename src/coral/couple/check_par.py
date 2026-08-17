@@ -44,6 +44,16 @@ def check_par(par_path):
                     problems.append(f"{ref} -> {p[1]} does not exist")
                 elif ref == "bdyfile":
                     problems += check_bdy(f)
+    # Numeric fields must parse as floats. An unsubstituted placeholder (tstart <T0>)
+    # otherwise reaches LISFLOOD as "error reading decimal param" after the job starts.
+    for ln in Path(par_path).read_text().splitlines():
+        p = ln.split("#")[0].split()
+        if len(p) >= 2 and p[0] in ("tstart", "sim_time", "saveint", "massint",
+                                    "initial_tstep", "max_Froude"):
+            try:
+                float(p[1])
+            except ValueError:
+                problems.append(f"{p[0]} is not a number: {p[1]!r}")
     return problems
 
 
