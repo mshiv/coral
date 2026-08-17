@@ -37,8 +37,11 @@ else
     echo "topo: no scratch/ in $MATTHEW -- setrun will download it on the first make .data"
 fi
 
-# 3. install the finalized setrun.py (gauges + flagregion already inlined)
+# 3. install the tracked setrun.py and kml2slu.py. kml2slu is here because the case copy uses
+#    chained assignment, which writes to a temporary under pandas Copy-on-Write, so every
+#    ruled-rectangle value came back None and RuledRectangle failed comparing None to None.
 cp templates/setrun.py "$DEST/setrun.py"
+cp templates/kml2slu.py "$DEST/kml2slu.py"
 
 # 4. regenerate the .data files from the new setrun.py. setrun reads the scenario, so pass it
 #    through: without it setrun falls back to a path under $CORAL, and if that is unset the
