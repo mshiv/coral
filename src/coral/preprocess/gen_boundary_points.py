@@ -201,7 +201,7 @@ def main():
     lons = [p[0] for p in pts]; lats = [p[1] for p in pts]
     fr = [min(lons) - 0.02, max(lons) + 0.02, min(lats) - 0.02, max(lats) + 0.02]
     lvl = cfg.geoclaw.amr_max if cfg is not None else 6
-    print(f">>> level-{lvl} refine box (gauges + nested domain) for the scenario:")
+    print(f">>> level-{lvl} refine box (gauges only; GeoClaw is read nowhere else) for the scenario:")
     print(f"    refine_box: [{fr[0]:.3f}, {fr[1]:.3f}, {fr[2]:.3f}, {fr[3]:.3f}]")
 
     os.makedirs(os.path.dirname(args.qc) or ".", exist_ok=True)
