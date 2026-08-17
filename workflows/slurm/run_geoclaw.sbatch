@@ -3,19 +3,28 @@
 #SBATCH --account=gts-arobel3-atlas
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=24
-#SBATCH --mem=64G
+#SBATCH --exclusive
 #SBATCH --output=out.geoclaw.%j
 #SBATCH --error=err.geoclaw.%j
 #SBATCH --time=12:00:00
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=smurugan9@gatech.edu
 
 # Run one GeoClaw case.
 #   sbatch run_geoclaw.sbatch <run_dir> [scenario.yaml]
 #
-# GeoClaw's AMR loop is OpenMP-only, so this is one node with threads. The cost is driven by
-# the finest level and the area it covers: level 7 (~36 m) over the 22 x 61 km gauge box is
-# far more than level 6 (~145 m) over the same box, because each extra level refines in x, y
-# and t together.
+# GeoClaw's AMR loop is OpenMP-only: shared memory, ONE node. Asking for two nodes allocates a
+# second one that cannot participate, and the CPU-hours accounting still bills for it. This
+# takes one node exclusively, which gives every core and all its memory without guessing at a
+# --mem value; level 7 holds many more AMR patches than level 6 and the footprint is not
+# something to be tight about.
+#
+# Cost is driven by the finest level and the area it covers. Level 7 (~36 m) over the 22 x 61 km
+# gauge box is several times level 6 (~145 m) over the same box, because each extra level
+# refines in x, y AND t together.
+#
+# This runs .data and .output only. `make all` also builds plots, which on a case like this is
+# hundreds of frames and a large share of the wall time.
 #
 # setrun.py reads the scenario for sea_level, amr_max and refine_box, so the level is changed
 # by editing the config rather than the file. Pass the scenario explicitly here: the job runs
@@ -31,7 +40,8 @@ module load gcc/12.3.0 netcdf-c/4.9.2-gszew36
 RUN_DIR="${1:?usage: sbatch run_geoclaw.sbatch <run_dir> [scenario.yaml]}"
 SCENARIO="${2:-$CORAL/configs/scenarios/savannah_matthew_compound.yaml}"
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# One thread per core on the node. With --exclusive, SLURM_CPUS_ON_NODE is the whole node.
+export OMP_NUM_THREADS=${SLURM_CPUS_ON_NODE:-${SLURM_CPUS_PER_TASK:-24}}
 export CORAL_SCENARIO="$SCENARIO"
 
 cd "$RUN_DIR"
