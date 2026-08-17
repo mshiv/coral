@@ -474,16 +474,21 @@ def setrun(claw_pkg='geoclaw'):
     # above stays as it is. IDs start at 100, so bc1..bc63 and the NOAA stations at 64..68 keep
     # their numbers and the sorting script is unaffected.
     #
-    #   python -m coral.geoclaw.make_gauges --spacing-m 100 --seaward-cells 3
-    obs_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'obs_gauges.txt')
+    #   python -m coral.preprocess.gen_boundary_points --dem <30 m DEM> \
+    #       --config configs/scenarios/savannah_matthew_tide.yaml --obs-spacing-m 100
+    #
+    # Numbered from 100 rather than from the id in the file. gen_boundary_points continues its
+    # own numbering from the coupling count, which is 64 here and would land on the NOAA
+    # stations at 64-68.
+    obs_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'obs_gauges.csv')
     if os.path.exists(obs_file):
-        pts = np.loadtxt(obs_file, ndmin=2)
-        for i, (gx, gy) in enumerate(pts[:, :2]):
-            rundata.gaugedata.gauges.append([100 + i, float(gx), float(gy),
+        pts = np.atleast_2d(np.genfromtxt(obs_file, delimiter=',', skip_header=1))
+        for i, row in enumerate(pts):
+            rundata.gaugedata.gauges.append([100 + i, float(row[1]), float(row[2]),
                                              rundata.clawdata.t0, rundata.clawdata.tfinal])
         print('setrun: added %d observation gauges from %s' % (len(pts), obs_file))
     else:
-        print('setrun: no obs_gauges.txt, running with the coupling and NOAA gauges only')
+        print('setrun: no obs_gauges.csv, running with the coupling and NOAA gauges only')
 
     # Force the gauges to also record the wind and pressure fields
     # rundata.gaugedata.aux_out_fields = [4, 5, 6]
