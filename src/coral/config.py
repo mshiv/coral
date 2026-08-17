@@ -45,8 +45,8 @@ class Domain:
 class GeoClaw:
     storm: str = "matthew"            # open label (extensible), validated non-empty
     drag: str = "garratt"             # one of DRAG_LAWS
-    sea_level: float = 0.81           # static high-tide stage (m, MSL)
-    amr_max: int = 6
+    sea_level: float = 0.0            # run datum; the tide enters through the .bdy
+    amr_max: int = 7
     refine_box: list[float] = field(default_factory=list)   # [W,E,S,N]
 
     def __post_init__(self):
@@ -264,11 +264,27 @@ def _merge(base: dict, override: dict) -> dict:
 
 def load(scenario_path: str | Path,
          base: str | Path = "configs/base.yaml") -> Scenario:
-    """Load base.yaml then overlay the scenario YAML, return a Scenario."""
-    data = yaml.safe_load(open(base)) if Path(base).exists() else {}
+    """Load base.yaml then overlay the scenario YAML, return a Scenario.
+
+    base is resolved next to the scenario file when the given path does not exist, so a tool
+    run from a subdirectory still gets the shared defaults. Silently falling back to dataclass
+    defaults is worse than failing: a run from the wrong directory used amr_max 6 while the
+    config said 7, and nothing said so.
+    """
+    base = Path(base)
+    if not base.exists():
+        near = Path(scenario_path).resolve().parent.parent / "base.yaml"
+        if near.exists():
+            base = near
+        else:
+            raise SystemExit(
+                f"base config not found at {base} or {near}. Run from the repo root, or pass "
+                f"base= explicitly; without it every shared default falls back silently.")
+    data = yaml.safe_load(open(base))
     data = _merge(data, yaml.safe_load(open(scenario_path)))
     sub = {k: globals()[cls](**data[k]) for k, cls in {
         "domain": "Domain", "geoclaw": "GeoClaw", "coupling": "Coupling",
         "manning": "Manning", "lisflood": "LisfloodCfg", "forcing": "Forcing",
+        "datums": "Datums",
         "hpc": "HPC", "interventions": "Interventions"}.items() if k in data}
     return Scenario(name=data["name"], **sub)
