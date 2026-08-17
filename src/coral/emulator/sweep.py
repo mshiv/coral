@@ -124,10 +124,72 @@ def _asc_ext(path):
     return [h["xllcorner"], h["xllcorner"]+nx*cs, h["yllcorner"], h["yllcorner"]+ny*cs]
 
 
+def _roads_mask(roads_geojson, dem_asc):
+    """Road centrelines burned onto the DEM grid as a boolean mask."""
+    import geopandas as gpd
+    from rasterio.features import rasterize
+    from ..interventions.context_rasters import _grid
+    shape, tr = _grid(dem_asc)
+    g = gpd.read_file(roads_geojson).to_crs(4326)
+    if len(g) == 0:
+        return np.zeros(shape, bool)
+    return rasterize([(x, 1) for x in g.geometry if x is not None],
+                     out_shape=shape, transform=tr, fill=0, all_touched=True).astype(bool)
+
+
+def _check_environment():
+    """Stop if scikit-image is missing.
+
+    shoreline_contour falls back to a nearest-neighbour walk without it, and the fallback is
+    not a coarser version of the same thing: on the 4 m Pin Point clip marching squares gives
+    98 separate shoreline contours and the fallback gives one merged path of 30626 points. A
+    wall taken from that path can run between disconnected shorelines. The run still completes,
+    which is why this needs to fail here rather than be noticed later.
+    """
+    try:
+        import skimage  # noqa: F401
+    except ImportError:
+        raise SystemExit("scikit-image is not installed. Seawall alignments would come from the "
+                         "fallback contour walk, which produces different structures. "
+                         "Install it before building an ensemble.")
+
+
+def _check_par(base):
+    """Check that every file the base .par names is present in the base directory.
+
+    A .par staged into members keeps whatever filenames it was written with. When the base
+    holds renamed grids the members build cleanly and every job then dies on the first read
+    with 'ERROR: Loading DEM'. Cheaper to catch here.
+    """
+    pars = sorted(Path(base).glob("*.par"))
+    if not pars:
+        raise SystemExit(f"no .par file in {base}")
+    par_path = pars[0]
+    keys = ("DEMfile", "manningfile", "bcifile", "bdyfile", "startfile",
+            "rainfall", "infilfile", "infilcapfile")
+    missing, saveint = [], None
+    for line in par_path.read_text().splitlines():
+        f = line.split()
+        if len(f) < 2:
+            continue
+        if f[0] in keys and not (Path(base) / Path(f[1]).name).exists():
+            missing.append(f"{f[0]} -> {f[1]}")
+        if f[0] == "saveint":
+            saveint = float(f[1])
+    if missing:
+        raise SystemExit(f"{par_path} names files that are not in {base}:\n  "
+                         + "\n  ".join(missing))
+    # A snapshot every 30 min is about 2.3 GB per member at 4 m. Fine for one reference run,
+    # 2.3 TB across a thousand members.
+    if saveint is not None and saveint < 100000:
+        print(f"  warning: saveint {saveint:.0f} writes snapshots for every member. Ensembles "
+              f"want the end state only; raise it unless the snapshots are wanted.")
+
+
 def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                 bdy_glob="*.bdy", sea_level=0.81,
                 focus_center=None, focus_radius_km=None, focus_mask=None, nlcd=None,
-                wetlands=None, soil_ksat=None, buildings=None,
+                wetlands=None, soil_ksat=None, buildings=None, roads=None,
                 place="random", flood_depth=None, flood_zone=None, res_m=30.0,
                 job_array=True, lisflood_bin="lisflood", account="gts-arobel3-atlas",
                 partition="cpu-medium", throttle=50,
@@ -202,6 +264,9 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
             link(base_path, dest); return False
         write_ascii(str(dest), arr, str(dem_p)); return True
 
+    _check_environment()
+    _check_par(base)
+
     manifest = []
     for _mi, spec in enumerate(specs):
         run = out_root / spec["name"]; run.mkdir(exist_ok=True)
@@ -223,6 +288,8 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                                                         sea_level=member_sea_level,
                                                         classes=classes, focus=focus,
                                                         wetlands=wetlands, soil_ksat=soil_ksat,
+                                                        roads=roads,
+                                                        slr_buffer=float(spec.get("slr_m", 0.0)) or 0.5,
                                                         buildings=buildings, place=place,
                                                         flood_depth=flood_depth, flood_zone=flood_zone,
                                                         res_m=res_m)
@@ -393,11 +460,19 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
     wet = sk = bld = None
     from ..interventions.context_rasters import wetlands_mask, soil_ksat_grid, buildings_mask
     if iv.wetlands:
-        wet = wetlands_mask(iv.wetlands, str(dem_p))
+        # Pass the classes explicitly. The default counts every NWI polygon, including E1UB
+        # subtidal bottom and marine deepwater, so marsh siting could rank open water.
+        wet = wetlands_mask(iv.wetlands, str(dem_p),
+                            cowardin_prefixes=("E2EM", "E2SS", "E2FO", "E2US"))
     if iv.soils_geojson and iv.ssurgo_table:
         sk = soil_ksat_grid(iv.soils_geojson, iv.ssurgo_table, str(dem_p))
     if iv.buildings:
         bld = buildings_mask(iv.buildings, str(dem_p))
+    rds = None
+    if getattr(iv, 'roads', None):
+        # Road centrelines rasterised onto the grid. road_raise needs an alignment
+        # to follow, and scores nothing without one.
+        rds = _roads_mask(iv.roads, str(dem_p))
     fdep = fz = None
     if iv.siting == "targeted":                          # resolve the targeting drivers
         if not iv.flood_depth:
@@ -419,7 +494,7 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
     return build_sweep(base_dir, specs, out_root, root=root, sea_level=cfg.geoclaw.sea_level,
                        focus_center=cfg.domain.ref_point,
                        focus_radius_km=iv.focus_radius_km or cfg.domain.focus_radius_km,
-                       nlcd=nlcd, wetlands=wet, soil_ksat=sk, buildings=bld,
+                       nlcd=nlcd, wetlands=wet, soil_ksat=sk, buildings=bld, roads=rds,
                        place=iv.siting, flood_depth=fdep, flood_zone=fz,
                        res_m=cfg.domain.res_m,
                        modules=cfg.hpc.modules, cpus_per_task=cfg.hpc.cpus_per_task,

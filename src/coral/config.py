@@ -150,10 +150,11 @@ class Interventions:
     #                                           those counts, so each system size is equally
     #                                           represented.
     # SAGIS context data (paths) for conditioned siting; None = generic elevation/NLCD siting
-    wetlands: Optional[str] = None            # NWI geojson -> marsh/mangrove footprint
+    wetlands: Optional[str] = None            # NWI geojson -> marsh footprint
     soils_geojson: Optional[str] = None       # SSURGO soils geojson (MUKEY) -> de-pave Ksat cap
     ssurgo_table: Optional[str] = None        # fetch_ssurgo ksat table json (with soils_geojson)
     buildings: Optional[str] = None           # FEMA footprints geojson -> retreat siting
+    roads: Optional[str] = None               # Overture segments geojson -> road_raise siting
 
     def __post_init__(self):
         from .interventions.generate import INTERVENTIONS
