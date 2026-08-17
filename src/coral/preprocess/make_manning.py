@@ -168,7 +168,7 @@ def main():
                     help="n for unmapped cells below --water-level (ocean)")
     ap.add_argument("--water-level", type=float, default=None,
                     help="DEM elevation (m) below which unmapped cells are water "
-                         "(default from config manning.sea_level)")
+                         "(default from config manning.water_level)")
     ap.add_argument("--config", help="scenario YAML (provides water-level)")
     ap.add_argument("--nwi", default=None,
                     help="optional NWI wetlands GeoJSON (e.g. from fetch_sagis.py "
@@ -177,7 +177,9 @@ def main():
     if args.water_level is None:
         if args.config:
             from coral import config
-            args.water_level = config.load(args.config).manning.sea_level
+            _c = config.load(args.config)
+            args.water_level = (_c.manning.water_level
+                                if _c.manning.water_level is not None else _c.datums.mhw)
         else:
             args.water_level = 0.81
 

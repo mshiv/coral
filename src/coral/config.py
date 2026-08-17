@@ -55,6 +55,22 @@ class GeoClaw:
         _require(self.drag, DRAG_LAWS, "geoclaw.drag")
 
 @dataclass
+class Datums:
+    """Tidal datums for the forcing station, m NAVD88.
+
+    One place for the waterline, because three different roles were using three different
+    numbers: roughness classification, the shoreline contour the seaward front follows, and the
+    marsh migration band. `sea_level` in the geoclaw block is a different quantity -- the run
+    datum -- and is 0.0.
+    """
+    station: str = "8670870"          # Fort Pulaski
+    mhw: float = 1.114
+    msl: float = 0.074
+    mlw: float = -1.091
+    source: str = "2016 observed, CO-OPS 6-min, Matthew week excluded"
+
+
+@dataclass
 class Coupling:
     gauge_spacing_m: float = 400.0
     seaward_cells: int = 3
@@ -69,7 +85,11 @@ class Coupling:
 class Manning:
     source: str = "nlcd2016"          # one of MANNING_SOURCES
     constant_n: float = 0.06
-    sea_level: float = 0.81
+    # Land/water threshold for classifying cells, NOT a datum. Cells below it that land cover
+    # leaves unmapped get water roughness, and it is the contour gen_boundary_points follows to
+    # find the shoreline. Named sea_level until 2026-08-17, which collided with
+    # geoclaw.sea_level -- a different quantity that is now 0.0 while this stays near MHW.
+    water_level: float | None = None   # None -> datums.mhw
 
     def __post_init__(self):
         _require(self.source, MANNING_SOURCES, "manning.source")
@@ -169,6 +189,7 @@ class Scenario:
     geoclaw: GeoClaw = field(default_factory=GeoClaw)
     coupling: Coupling = field(default_factory=Coupling)
     manning: Manning = field(default_factory=Manning)
+    datums: Datums = field(default_factory=Datums)
     lisflood: LisfloodCfg = field(default_factory=LisfloodCfg)
     forcing: Forcing = field(default_factory=Forcing)
     hpc: HPC = field(default_factory=HPC)

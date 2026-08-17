@@ -187,7 +187,7 @@ def _check_par(base):
 
 
 def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
-                bdy_glob="*.bdy", sea_level=0.81,
+                bdy_glob="*.bdy", sea_level=0.81, mhw=1.114, mlw=-1.091,
                 focus_center=None, focus_radius_km=None, focus_mask=None, nlcd=None,
                 wetlands=None, soil_ksat=None, buildings=None, roads=None,
                 place="random", flood_depth=None, flood_zone=None, res_m=30.0,
@@ -290,6 +290,7 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                                                         wetlands=wetlands, soil_ksat=soil_ksat,
                                                         roads=roads,
                                                         slr_buffer=float(spec.get("slr_m", 0.0)) or 0.5,
+                                                        mhw=mhw, mlw=mlw,
                                                         buildings=buildings, place=place,
                                                         flood_depth=flood_depth, flood_zone=flood_zone,
                                                         res_m=res_m)
@@ -491,7 +492,15 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
         slr_levels_all += resolve_slr_scenarios(targets, station=cfg.forcing.tide_station)
     specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed,
                        seawall_walls=iv.seawall_walls)
-    return build_sweep(base_dir, specs, out_root, root=root, sea_level=cfg.geoclaw.sea_level,
+    # The tidal frame comes from the scenario so the migration band, the roughness threshold
+    # and the shoreline contour cannot drift apart.
+    #
+    # sea_level here is the WATERLINE siting classifies land and sea by -- where a wall follows
+    # the shore, where marsh can sit. That is datums.mhw. It is NOT geoclaw.sea_level, which is
+    # the run datum and is 0.0 since the tide moved into the .bdy. Passing the datum would site
+    # walls on the MSL contour rather than the shoreline.
+    return build_sweep(base_dir, specs, out_root, root=root, sea_level=cfg.datums.mhw,
+                       mhw=cfg.datums.mhw, mlw=cfg.datums.mlw,
                        focus_center=cfg.domain.ref_point,
                        focus_radius_km=iv.focus_radius_km or cfg.domain.focus_radius_km,
                        nlcd=nlcd, wetlands=wet, soil_ksat=sk, buildings=bld, roads=rds,

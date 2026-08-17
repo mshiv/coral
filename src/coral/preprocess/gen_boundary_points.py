@@ -65,7 +65,9 @@ def main():
     if args.config:
         from coral import config
         c = cfg = config.load(args.config)
-        if args.level is None:         args.level = c.manning.sea_level
+        if args.level is None:         args.level = (c.manning.water_level
+                                             if c.manning.water_level is not None
+                                             else c.datums.mhw)
         if args.spacing_m is None:     args.spacing_m = c.coupling.gauge_spacing_m
         if args.seaward_cells is None: args.seaward_cells = c.coupling.seaward_cells
         if args.name is None:          args.name = f"{c.name}_coastline"

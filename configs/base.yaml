@@ -9,14 +9,32 @@ geoclaw:
   sea_level: 0.0
   amr_max: 7
 coupling:
-  gauge_spacing_m: 400
+  gauge_spacing_m: 100      # 100 m needs GeoClaw level 7; at level 6 (~145 m)
+                            # adjacent gauges share a cell and repeat each other
   seaward_cells: 3
   datum_offset_m: 0.071
   dry_thresh: 0.05
   landfall_s: 172800        # bdy time-shift origin (so series starts at 0)
+# Tidal datums at Fort Pulaski (NOAA 8670870), m NAVD88. Computed from the 2016 6-minute
+# CO-OPS record with the Matthew week (5-12 Oct) excluded: tidal extrema at least 10 h apart,
+# averaged. 707 high waters, 1.93/day.
+#
+# The published NTDE 1983-2001 values are MHW +0.938, MSL -0.071, MLW -1.170. That epoch is
+# centred on 1992, so it describes a sea level 0.08-0.18 m below the event. Contemporary years
+# give MHW 1.104 (2014), 1.109 (2015), 1.114 (2016), 1.071 (2017), 1.068 (2018), so 2016 is
+# representative rather than anomalous.
+#
+# This is the WATERLINE, used for roughness classification, the shoreline contour the seaward
+# front follows, and the marsh migration band. geoclaw.sea_level is the run DATUM and is 0.0.
+datums:
+  station: "8670870"
+  mhw: 1.114
+  msl: 0.074
+  mlw: -1.091
+  source: "2016 observed, CO-OPS 6-min, Matthew week excluded"
 manning:
   source: nlcd2016
-  sea_level: 0.81
+  water_level: null         # null -> datums.mhw
 lisflood:
   saveint: 1800
   sim_window_h: [-24, 24]   # relative to landfall
