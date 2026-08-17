@@ -6,8 +6,13 @@
 # run (savannah_matthew_LR, sea_level 0.81) to show the value of a dynamic tide.
 name: savannah_matthew_tide
 domain:
-  dem:   data/raw/ga_cudem_30m.asc
-  bbox:  [-81.22, -80.82, 31.82, 32.08]
+  dem:   data/raw/ga_cudem_30m.tif
+  # Extended south and north on 2026-08-17. The old box [31.82, 32.08] closed the Ogeechee
+  # (3.3 km) at the south edge and the Savannah River (5.1 km) at the north, both 14 km from
+  # Pin Point and inside a tidal excursion of it. The walls are now about 25 km away. Cost is
+  # 2.11x the cells; the timestep barely moves (2.23 s -> 2.07 s) because the deepest cell only
+  # goes from -18.5 m to -21.5 m, so runtime scales with cell count alone.
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
   res_m: 30
   ref_point: [-81.0903, 31.9522]
 geoclaw:
@@ -16,6 +21,11 @@ geoclaw:
   refine_box: [-81.111, -80.819, 31.804, 32.100]
 coupling:
   landfall_utc: "2016-10-08T13:00:00"
+# Parked. A 180 h window ([-30, 150], 86400-691200 s) was tried for river discharge, but it
+# outruns the GeoClaw run, which stops at +1 day. Needs tfinal raised and the boundary extended
+# with build_bdy --extend before it means anything. Not part of the dissertation runs.
+# lisflood:
+#   sim_window_h: [-30, 150]
 forcing:
   tide: noaa            # time-varying tide from NOAA CO-OPS (Fort Pulaski)
   tide_station: "8670870"

@@ -61,9 +61,10 @@ def main():
     args = ap.parse_args()
 
     # fill unset args from the scenario config (CLI args still override)
+    cfg = None
     if args.config:
         from coral import config
-        c = config.load(args.config)
+        c = cfg = config.load(args.config)
         if args.level is None:         args.level = c.manning.sea_level
         if args.spacing_m is None:     args.spacing_m = c.coupling.gauge_spacing_m
         if args.seaward_cells is None: args.seaward_cells = c.coupling.seaward_cells
@@ -193,11 +194,15 @@ def main():
             print(f"    x1,x2 = {min(ol) - 0.005:.3f}, {max(ol) + 0.005:.3f}")
             print(f"    y1,y2 = {min(oa) - 0.005:.3f}, {max(oa) + 0.005:.3f}")
 
+    # The box covers the gauges and nothing else. GeoClaw output is read at the coupling
+    # gauges and nowhere else -- the 4 m nest reads the 30 m LISFLOOD result, not GeoClaw --
+    # so refining inland spends cells resolving an estuary LISFLOOD already resolves. The
+    # margin is what keeps the gauges off the edge of a refinement change.
     lons = [p[0] for p in pts]; lats = [p[1] for p in pts]
-    fr = (min(lons) - 0.02, max(lons) + 0.02, min(lats) - 0.02, max(lats) + 0.02)
-    print(">>> level-6 flagregion bbox for setrun.py:")
-    print(f"    x1,x2 = {fr[0]:.3f}, {fr[1]:.3f}")
-    print(f"    y1,y2 = {fr[2]:.3f}, {fr[3]:.3f}")
+    fr = [min(lons) - 0.02, max(lons) + 0.02, min(lats) - 0.02, max(lats) + 0.02]
+    lvl = cfg.geoclaw.amr_max if cfg is not None else 6
+    print(f">>> level-{lvl} refine box (gauges + nested domain) for the scenario:")
+    print(f"    refine_box: [{fr[0]:.3f}, {fr[1]:.3f}, {fr[2]:.3f}, {fr[3]:.3f}]")
 
     os.makedirs(os.path.dirname(args.qc) or ".", exist_ok=True)
     from matplotlib.colors import TwoSlopeNorm
@@ -220,7 +225,7 @@ def main():
     ax.scatter([args.lon], [args.lat], s=160, marker="*", c="yellow", ec="k",
                zorder=5, label="ref point")
     ax.add_patch(mpatches.Rectangle((fr[0], fr[2]), fr[1] - fr[0], fr[3] - fr[2],
-                 fill=False, ec="black", lw=1.5, ls="--", label="L6 flagregion"))
+                 fill=False, ec="black", lw=1.5, ls="--", label=f"L{lvl} refine box"))
     ax.legend(loc="lower left", fontsize=8)
     ax.set_xlabel("lon"); ax.set_ylabel("lat")
     ax.set_title("Seaward-front gauges over DEM (blue=water, brown=land)")

@@ -2,8 +2,13 @@
 # Same domain/surge as the LR baseline; adds rainfall forcing into LISFLOOD.
 name: savannah_matthew_compound
 domain:
-  dem:   data/raw/ga_cudem_30m.asc
-  bbox:  [-81.22, -80.82, 31.82, 32.08]
+  dem:   data/raw/ga_cudem_30m.tif
+  # Extended south and north on 2026-08-17. The old box [31.82, 32.08] closed the Ogeechee
+  # (3.3 km) at the south edge and the Savannah River (5.1 km) at the north, both 14 km from
+  # Pin Point and inside a tidal excursion of it. The walls are now about 25 km away. Cost is
+  # 2.11x the cells; the timestep barely moves (2.23 s -> 2.07 s) because the deepest cell only
+  # goes from -18.5 m to -21.5 m, so runtime scales with cell count alone.
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
   res_m: 30
   ref_point: [-81.0903, 31.9522]
 geoclaw:
