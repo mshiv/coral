@@ -259,3 +259,6 @@ hatyan/
 /notes.md
 # generated figures under reports/ (keep the README.md files)
 reports/**/*.png
+
+# generated figures — regenerable from the viz modules
+reports/figures/
