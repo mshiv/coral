@@ -1,0 +1,51 @@
+# Final 4 m Pin Point decision ensemble. Supersedes pp4_tide_decision, which ran with marsh
+# infiltration that the wetland literature does not support, an unfiltered NWI mask, a migration
+# corridor that did not move with sea level, and seawall crests specified as absolute elevation.
+# See docs/ENSEMBLE_PROVENANCE.md for which ensemble used which physics.
+#
+# Six kinds. Mangrove is gone: Pin Point is 31.95 N and the poleward Georgia records sit near
+# 30.73 N, so it was a range-expansion hypothetical rather than an option. road_raise is new and
+# is the intervention the freeboard result argues for -- at a 0.45 m assumed first floor only 61
+# of 1548 structures take water, while the causeway is the only land access.
+#
+# include_combos is on. The single-kind ensembles answered the attribution question; the
+# optimiser combines options, so the emulator has to have seen combinations.
+#
+#   export CLEAN=$SCR/runs/pp4_tide_base
+#   python -m coral.emulator.sweep --base $CLEAN --out $SCR/runs/pp4_final \
+#       --config configs/scenarios/pp4_final.yaml --nlcd $DATA/nlcd_pinpoint.tif
+#   cd $SCR/runs/pp4_final && sbatch run_array.sbatch
+name: pp4_final
+domain:
+  dem:   data/raw/coned_pinpoint_4m_floored.asc
+  bbox:  [-81.1103, -81.0727, 31.9367, 31.9690]
+  res_m: 4
+  ref_point: [-81.0903, 31.9522]
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+  landfall_s: 172800
+lisflood:
+  sim_window_h: [-6, 18]           # same window as pp4_tide_decision, so the two compare
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
+interventions:
+  kinds: [seawall, marsh_migration, living_shoreline, depave, retreat, road_raise]
+  slr_levels: [0.0]
+  slr_scenarios: [["Low", 2050], ["IntLow", 2050], ["Int", 2050], ["IntHigh", 2050], ["High", 2050], ["Int", 2100], ["High", 2100]]
+  # Reporting happens at the 2050 horizon, so those five are sampled densely. Int and High 2100
+  # extend the range so the reported values sit interior. The High2100 hold-out is not run as a
+  # test: predicting above the trained range is extrapolation and fails as expected.
+  n_per_kind: 20
+  include_combos: true
+  focus_radius_km: 3.0             # scoping choice, tight around Pin Point
+  seed: 23                         # different from 7 and 11, so alignments differ
+  siting: targeted
+  flood_depth: ${CLEAN}/res_pinpoint_highres_4m.max
+  wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
+  soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
+  ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
+  buildings:     data/raw/sagis_pinpoint/fema_structures_pinpoint.geojson
+  roads:         data/raw/overture_roads_pinpoint.geojson
