@@ -42,14 +42,22 @@ def load_run(out_dir, max_coupling=8999):
     return runs
 
 
-def compare(coarse, fine):
-    """Per-gauge stats on the common time span, coarse gauge times as the reference grid."""
+def compare(coarse, fine, window=None):
+    """Per-gauge stats on the common time span, coarse gauge times as the reference grid.
+
+    `window` is (t1_h, t2_h) relative to landfall. Restrict to it when the runs differ in when
+    refinement switches on: creating or destroying fine grids mid-run puts a one-step transient
+    in the series, and differencing across it measures the switch rather than the resolution.
+    The window to use is coupling.sim_window_h, since that is all the .bdy carries.
+    """
     rows = []
     for gid, (lat, tc, ec) in coarse.items():
         if gid not in fine:
             continue
         _, tf, ef = fine[gid]
         lo, hi = max(tc.min(), tf.min()), min(tc.max(), tf.max())
+        if window is not None:
+            lo, hi = max(lo, window[0] * 3600.0), min(hi, window[1] * 3600.0)
         m = (tc >= lo) & (tc <= hi)
         if m.sum() < 2:
             continue
@@ -64,7 +72,8 @@ def compare(coarse, fine):
     return np.array(rows, dtype=dt)
 
 
-def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3):
+def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3,
+          window=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -72,12 +81,14 @@ def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3):
     c_all, f_all = load_run(coarse_dir), load_run(fine_dir)
     coup_c = {k: v for k, v in c_all.items() if k < 9000}
     coup_f = {k: v for k, v in f_all.items() if k < 9000}
-    st = compare(coup_c, coup_f)
+    st = compare(coup_c, coup_f, window)
     if st.size == 0:
         raise SystemExit("no gauges in common; check the two _output paths")
     st = st[np.argsort(st["lat"])]
 
-    print(f"{len(st)} coupling gauges compared, {labels[1]} against {labels[0]}")
+    win = ("full series" if window is None
+           else f"{window[0]:+g} to {window[1]:+g} h from landfall")
+    print(f"{len(st)} coupling gauges compared, {labels[1]} against {labels[0]}, over {win}")
     print(f"  peak eta   {labels[0]}: {st['peak_c'].max():+.3f} m max, "
           f"{np.median(st['peak_c']):+.3f} median")
     print(f"  peak eta   {labels[1]}: {st['peak_f'].max():+.3f} m max, "
@@ -91,7 +102,7 @@ def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3):
               f"{int((np.abs(st['dpeak']) > thr).sum())} of {len(st)}")
 
     noaa = compare({k: v for k, v in c_all.items() if k >= 9000},
-                   {k: v for k, v in f_all.items() if k >= 9000})
+                   {k: v for k, v in f_all.items() if k >= 9000}, window)
     for r in noaa:
         print(f"  NOAA {r['gid']}: peak {r['peak_c']:+.3f} -> {r['peak_f']:+.3f} m "
               f"({r['dpeak']:+.4f}), series RMSE {r['rmse']:.4f} m")
@@ -131,6 +142,8 @@ def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3):
                    f"gauge {gid}, lat {r['lat']:.3f}, dpeak {r['dpeak']:+.3f} m",
                    fontsize=7.5, color=PALETTE["text"])
     ax[2].axvline(0, color=PALETTE["intervention"], lw=1.0, ls="--")
+    if window:
+        ax[2].axvspan(window[0], window[1], color=PALETTE["flood"], alpha=0.07, lw=0)
     ax[2].set_xlabel("hours from landfall", fontsize=9)
     ax[2].set_ylabel("eta (m), series offset for clarity", fontsize=9)
     ax[2].set_title(f"C  The {n_show} gauges that disagree most", fontsize=11,
@@ -161,10 +174,15 @@ def main():
     ap.add_argument("--fine", required=True, help="_output of the higher-level run")
     ap.add_argument("--labels", nargs=2, default=["level 6 (145 m)", "level 7 (36 m)"])
     ap.add_argument("--n-show", type=int, default=3)
+    ap.add_argument("--window", nargs=2, type=float, default=None,
+                    metavar=("T1_H", "T2_H"),
+                    help="restrict to hours from landfall, normally coupling.sim_window_h. "
+                         "Use it when the runs switch refinement on at different times.")
     ap.add_argument("--csv", default=None, help="also write the per-gauge table")
     ap.add_argument("--out", default="reports/figures/amr_convergence.png")
     a = ap.parse_args()
-    st = build(a.coarse, a.fine, a.out, labels=tuple(a.labels), n_show=a.n_show)
+    st = build(a.coarse, a.fine, a.out, labels=tuple(a.labels), n_show=a.n_show,
+               window=tuple(a.window) if a.window else None)
     if a.csv:
         np.savetxt(a.csv, np.column_stack([st[n] for n in st.dtype.names]),
                    delimiter=",", header=",".join(st.dtype.names), comments="")
