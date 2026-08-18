@@ -52,7 +52,9 @@ python -c "
 from coral import config; import os
 c = config.load(os.environ['CORAL_SCENARIO'])
 print(f'  sea_level {c.geoclaw.sea_level}  amr_max {c.geoclaw.amr_max}  refine_box {c.geoclaw.refine_box}')"
-grep -vE '^#|^$' gauges.data | head -1
+# `|| true` is required. head closes the pipe after one line, grep dies on SIGPIPE with 141,
+# and pipefail plus set -e then kills the job silently before make ever runs.
+grep -vE '^#|^$' gauges.data | head -1 || true
 
 # .data is rebuilt here so the run matches the scenario as read at submit time, not whatever
 # was last written interactively. It needs no network once scratch/ is populated.
