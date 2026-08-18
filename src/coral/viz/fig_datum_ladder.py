@@ -3,7 +3,7 @@
 Three numbers get used as a waterline in this project and only two of them are datums. This
 figure puts them on the observed record so the choice can be made on evidence:
 
-  A  the Matthew record, showing where 0.81 m comes from -- the stage at the landfall hour
+  A  the Matthew record, with 0.81 m drawn on it -- it matches no feature of the event
   B  how often the water is actually above each level, over a full year of predictions
   C  how much of the domain the choice moves
 
@@ -119,7 +119,7 @@ def build(out, *, dem=None, year=2016, event=("20161005", "20161010"),
     ty, yy = series("predictions", f"{year}0101", f"{year}1231")
 
     fig, axes = plt.subplots(1, 3, figsize=(17, 5.2))
-    lines = {**dat, **{f"{c:.2f} m (landfall stage)": c for c in candidates}}
+    lines = {**dat, **{f"{c:.2f} m (candidate)": c for c in candidates}}
     colour = {"MHHW": "#7FB2D3", "MHW": PALETTE["flood"], "MSL": PALETTE["muted"],
               "MLW": "#9CC3D5", "MLLW": "#C9C2B6"}
 

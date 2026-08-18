@@ -1,9 +1,12 @@
 """Compare rainfall products, and decide whether uniform rain is good enough.
 
-AORC is about 4 km and MRMS about 1 km, so MRMS resolves rainbands that AORC smooths. That only
-matters if the model uses spatial rain. With `rain_mode: uniform` the field is collapsed to a
-domain-average series, and the question becomes narrower: does the domain average differ from
-what actually fell on the site?
+AORC v1.1 and MRMS are both about 1 km here -- AORC returns 66x48 cells over this domain and
+MRMS 55x40, so AORC is slightly finer. The comparison is of method, gauge-conditioned reanalysis
+against radar with gauge correction, not of resolution.
+
+Resolution only matters if the model uses spatial rain. With `rain_mode: uniform` the field is
+collapsed to a domain-average series, and the question becomes narrower: does the domain average
+differ from what actually fell on the site?
 
 That is the comparison this figure is for. The top row is total accumulation from each product,
 the difference between them, and the bottom row is the series that the model would actually be
