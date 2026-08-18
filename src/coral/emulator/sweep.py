@@ -521,8 +521,12 @@ if __name__ == "__main__":
     ap.add_argument("--config", help="scenario YAML with an `interventions:` block (Phase 3)")
     ap.add_argument("--nlcd", default=None)
     ap.add_argument("--slr", nargs="+", type=float, default=[0.0, 0.3, 0.6, 1.0, 1.5])
+    # Must be keys of INTERVENTIONS. `marsh` and `mangrove` were the old names and are now
+    # rejected by Interventions.__post_init__, so the stale default failed on any call that
+    # omitted --kinds.
     ap.add_argument("--kinds", nargs="+",
-                    default=["seawall", "marsh", "mangrove", "permeable", "retreat"])
+                    default=["seawall", "marsh_migration", "living_shoreline", "depave",
+                             "retreat", "road_raise"])
     ap.add_argument("--n-per-kind", type=int, default=4)
     a = ap.parse_args()
     if a.config:                                   # config-driven (SAGIS-conditioned) ensemble

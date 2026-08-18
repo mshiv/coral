@@ -10,7 +10,7 @@ domain:
   res_m: 2
   ref_point: [-81.0903, 31.9522]
 interventions:
-  kinds: [seawall, marsh, mangrove, permeable, retreat, depave]
+  kinds: [seawall, marsh_migration, living_shoreline, permeable, retreat, depave]
   slr_levels: [0.0, 0.3, 0.6, 1.0, 1.5]
   n_per_kind: 4
   include_combos: true
