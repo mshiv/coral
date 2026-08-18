@@ -49,10 +49,32 @@ class GeoClaw:
     amr_max: int = 7
     refine_box: list[float] = field(default_factory=list)   # [W,E,S,N]
 
+    # Forcing the finest level over the whole refine_box costs more than it looks. Each level
+    # refines in x, y AND t, so level 7 is 64x level 6 over the same area. Measured: level 7
+    # across the 33 x 63 km gauge box ran at 1.5% of the 72 h simulation in 5 wall hours,
+    # projecting to about 13.6 days.
+    #
+    # The coupling gauges lie on a curve, not a filled box. refine_front_km replaces the box
+    # region with a ruled rectangle hugging that curve, half-width in km. refine_t1_h starts
+    # the forced refinement late (hours relative to landfall, negative = before), because the
+    # .bdy only consumes the window in coupling.sim_window_h and the ocean ahead of that is
+    # quiescent. refine_t2_h ends it early for the same reason. Leave them None to force
+    # amr_max across the whole refine_box for the whole run, which is what cost 13.6 days.
+    refine_front_km: Optional[float] = None
+    refine_t1_h: Optional[float] = None
+    refine_t2_h: Optional[float] = None
+
+    # Override the end of the run, hours relative to landfall. None keeps setrun's +24 h.
+    # Mainly for short timing tests: set 2-3 h, confirm the gauges report the level you asked
+    # for, and measure the real rate before committing a long job.
+    tfinal_h: Optional[float] = None
+
     def __post_init__(self):
         if not self.storm:
             raise ValueError("geoclaw.storm must be a non-empty storm label")
         _require(self.drag, DRAG_LAWS, "geoclaw.drag")
+        if self.refine_front_km is not None and self.refine_front_km <= 0:
+            raise ValueError("geoclaw.refine_front_km must be positive")
 
 @dataclass
 class Datums:

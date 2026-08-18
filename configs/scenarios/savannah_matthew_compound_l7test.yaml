@@ -1,0 +1,30 @@
+# Timing probe for savannah_matthew_compound_l7. Not a result, and its output is disposable.
+#
+# Runs 3 h of model time instead of 72 h. Two things to read off it, both within 15 minutes:
+#   1. the level column in _output/gauge09002.txt must read 07. If it reads 06, the band misses
+#      the gauges and every eta in the real run would be at the wrong resolution.
+#   2. model seconds advanced per wall second, which extrapolates to the full 259200 s with no
+#      guessing about how AMR buffering changed the realised cost.
+#
+# refine_t1_h is pulled back to t0 deliberately. With the production -12 h start, nothing would
+# be refined during a probe that ends at -45 h, and the level check would pass for the wrong
+# reason or fail for one.
+name: savannah_matthew_compound_l7test
+domain:
+  dem:   data/raw/ga_cudem_30m.tif
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  amr_max: 7
+  refine_box: [-81.150, -80.800, 31.680, 32.244]
+  refine_front_km: 2.5
+  refine_t1_h: -48.0       # t0, so the band is live for the whole probe
+  tfinal_h: -45.0          # t0 is -48 h: a 3 h run
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true

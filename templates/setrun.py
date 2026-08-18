@@ -146,7 +146,11 @@ def setrun(claw_pkg='geoclaw'):
 
     if clawdata.output_style == 1:
         # Output nout frames at equally spaced times up to tfinal:
-        clawdata.tfinal = days2seconds(1)
+        # geoclaw.tfinal_h shortens the run for timing tests. Landfall is t = 0, so +24 h is
+        # the production value and 2-3 h is enough to read the gauge level and the real rate.
+        clawdata.tfinal = (_CFG.geoclaw.tfinal_h * 3600.0
+                           if (_CFG and _CFG.geoclaw.tfinal_h is not None)
+                           else days2seconds(1))
         recurrence = 4
         clawdata.num_output_times = int((clawdata.tfinal - clawdata.t0) *
                                         recurrence / (60 ** 2 * 24))
@@ -355,12 +359,51 @@ def setrun(claw_pkg='geoclaw'):
     regions.append([1, 3, rundata.clawdata.t0, rundata.clawdata.tfinal, clawdata.lower[0], clawdata.upper[0],
                     clawdata.lower[1], clawdata.upper[1]])
 
-    # Pin Point / Savannah coupling box -- force finest level (6, ~145 m) ONLY here.
+    # Pin Point / Savannah coupling box -- force the finest level ONLY here.
     # Everything else stays coarse; the surge wave self-refines en route (wave_tolerance=1.0).
     _lvl = _CFG.geoclaw.amr_max if _CFG else 7
     _box = list(_CFG.geoclaw.refine_box) if (_CFG and _CFG.geoclaw.refine_box) \
         else [-81.111, -80.819, 31.804, 32.100]
-    regions.append([_lvl, _lvl, rundata.clawdata.t0, rundata.clawdata.tfinal, *_box])
+
+    # Forced refinement can start late. The .bdy only consumes coupling.sim_window_h and the
+    # ocean before that is quiescent, so holding the box at the finest level from t0 pays for
+    # a day and a half of model time that is thrown away.
+    _t1 = (_CFG.geoclaw.refine_t1_h * 3600.0
+           if (_CFG and _CFG.geoclaw.refine_t1_h is not None)
+           else rundata.clawdata.t0)
+    if _t1 < rundata.clawdata.t0:
+        _t1 = rundata.clawdata.t0
+    _t2 = (_CFG.geoclaw.refine_t2_h * 3600.0
+           if (_CFG and _CFG.geoclaw.refine_t2_h is not None)
+           else rundata.clawdata.tfinal)
+    if _t2 > rundata.clawdata.tfinal:
+        _t2 = rundata.clawdata.tfinal
+
+    _front_km = _CFG.geoclaw.refine_front_km if _CFG else None
+    if _front_km:
+        # The gauges lie on a curve. Refine a band around the curve instead of its bounding
+        # box, as a ruled rectangle -- the same shape kml2slu builds for the other regions.
+        from coral.geoclaw.refine_front import write as _write_front
+        _front_file = os.path.abspath('RuledRectangle_front.data')
+        _csv = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'boundary_points.csv')
+        _slu = _write_front(_csv, _front_file, _front_km)
+        _fr = FlagRegion(num_dim=2)
+        _fr.name = 'Region_front'
+        _fr.minlevel = _lvl
+        _fr.maxlevel = _lvl
+        _fr.t1 = _t1
+        _fr.t2 = _t2
+        _fr.spatial_region_type = 2          # Ruled Rectangle
+        _fr.spatial_region_file = _front_file
+        rundata.flagregiondata.flagregions.append(_fr)
+        print('setrun: level %d forced in a %.1f km band on %d gauge latitudes, '
+              't = %.0f to %.0f s' % (_lvl, _front_km, _slu.shape[0] - 2, _t1, _t2))
+        # The box still caps refinement so nothing outside the band reaches _lvl by flagging.
+        regions.append([1, max(_lvl - 1, 1), rundata.clawdata.t0, rundata.clawdata.tfinal,
+                        *_box])
+    else:
+        regions.append([_lvl, _lvl, _t1, _t2, *_box])
 
     # append as many flagregions as desired to this list:
     flagregions = rundata.flagregiondata.flagregions

@@ -7,7 +7,16 @@ geoclaw:
   # in every fort.q and made the surge unreadable as an anomaly. savannah_matthew_LR keeps
   # 0.81 as the historical static-tide comparison.
   sea_level: 0.0
-  amr_max: 7
+  # Level 6 (~145 m) is the production level. Level 7 (~36 m) forced across the whole gauge
+  # box was measured at 1.5% of the 72 h run in 5 wall hours, projecting to 13.6 days: each
+  # level refines in x, y AND t, so level 7 is 64x level 6 over the same area.
+  #
+  # 100 m gauge spacing does NOT require level 7. Adjacent gauges do share a 145 m cell, but
+  # repetition is not error: the surge offshore is smooth at scales of km, and the gauges sit
+  # on the open-water front, not inside the sounds. The 100 m spacing exists because the .bci
+  # point sources do not force the cells between them, which is a LISFLOOD requirement, not a
+  # GeoClaw resolution one. savannah_matthew_compound_l7 is the convergence test.
+  amr_max: 6
 coupling:
   gauge_spacing_m: 100      # 100 m needs GeoClaw level 7; at level 6 (~145 m)
                             # adjacent gauges share a cell and repeat each other

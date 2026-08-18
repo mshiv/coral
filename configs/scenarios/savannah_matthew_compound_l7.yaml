@@ -1,0 +1,32 @@
+# Level 7 (~36 m) convergence test against savannah_matthew_compound, which runs at level 6.
+#
+# Same storm, same domain, same datum, same gauges. The only difference is how finely GeoClaw
+# resolves the water it hands to the coupling gauges, so the two .bdy files are directly
+# comparable and the difference between them is the resolution error in the boundary condition.
+#
+# Level 7 forced across the whole refine_box was measured at 1.5% of the run in 5 wall hours,
+# projecting to 13.6 days. This keeps 36 m but pays for it only where and when it is read: a
+# band around the gauge curve rather than the curve's bounding box, and starting 12 h before
+# landfall rather than 48 h.
+name: savannah_matthew_compound_l7
+domain:
+  dem:   data/raw/ga_cudem_30m.tif
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  amr_max: 7
+  refine_box: [-81.150, -80.800, 31.680, 32.244]   # caps refinement outside the band at 6
+  # Bounded on all three axes. Area: a 3 km band on the gauge curve, 6.9x smaller than its
+  # bounding box. Time: coupling.sim_window_h is [-6, 18], so refining from -48 to +24 pays for
+  # 48 h of model time the .bdy discards. 2 h of margin either side of the window.
+  refine_front_km: 1.5
+  refine_t1_h: -8.0
+  refine_t2_h: 20.0
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
