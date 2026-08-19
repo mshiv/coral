@@ -15,18 +15,20 @@ startelev
 {% endif %}
 latlong
 sgc_enable
+{% if lisflood.acceleration %}acceleration
+{% endif %}
 
 tstart         {{ '%.1f' % tstart }}
 sim_time       {{ '%.1f' % sim_time }}
 initial_tstep  {{ lisflood.initial_tstep }}
 max_Froude     1
-qoutput
-
+{% if lisflood.voutput %}qoutput
+{% endif %}
 massint        1200
 saveint        {{ lisflood.saveint }}
-voutput_max
+{% if lisflood.voutput %}voutput_max
 hazard
-{% if lisflood.checkpoint_h %}checkpoint     {{ lisflood.checkpoint_h }}
+{% endif %}{% if lisflood.checkpoint_h %}checkpoint     {{ lisflood.checkpoint_h }}
 {% endif %}# netcdf_out   # disabled: segfaults on finalization in this build; use ASCII
 
 dirroot        results_{{ name }}

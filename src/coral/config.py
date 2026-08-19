@@ -137,6 +137,14 @@ class LisfloodCfg:
     # the stale checkpoint and can sit at the first step, and the .mass then opens with a
     # "Checkpoint restart" banner on what looks like a fresh run.
     checkpoint_h: Optional[float] = None
+    # LISFLOOD-FP's local-inertial solver, which is the formulation the methods describe. The
+    # template did not emit it, so rendered runs solved with a different scheme: at 4 m that
+    # blew up, reaching 9.5 m mean depth with a collapsing timestep and mass error exceeding the
+    # volume, while the hand-written par that carries it conserves at 1e-16 on the same grid.
+    acceleration: bool = True
+    # Velocity and hazard outputs. OFF by default: the blocker table records a heap-corruption
+    # bug in these on this build, and the template had them on unconditionally.
+    voutput: bool = False
     sim_window_h: list[float] = field(default_factory=lambda: [-24, 24])
     initial_tstep: float = 10.0
 
