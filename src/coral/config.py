@@ -128,6 +128,15 @@ class Manning:
 @dataclass
 class LisfloodCfg:
     saveint: float = 1800.0
+    # Primed initial water surface, required by any run using edge boundary conditions: edge
+    # flux is guarded by `if (H > DepthThresh)` (sgc.cpp:1354), so an edge on a dry domain is
+    # inert forever. Build it with couple.make_startfile --level. Rendered alongside a bare
+    # `startelev`, which tells LISFLOOD the file is water-surface elevation, not depth.
+    startfile: Optional[str] = None
+    # Hours between restart files. Off by default: on a resubmit or a timeout LISFLOOD reloads
+    # the stale checkpoint and can sit at the first step, and the .mass then opens with a
+    # "Checkpoint restart" banner on what looks like a fresh run.
+    checkpoint_h: Optional[float] = None
     sim_window_h: list[float] = field(default_factory=lambda: [-24, 24])
     initial_tstep: float = 10.0
 

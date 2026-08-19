@@ -10,6 +10,9 @@ bdyfile        {{ name }}.bdy
 {% if forcing.infil_capped %}infilcapfile   infilcap_{{ name }}.asc
 {% endif %}{% endif %}
 
+{% if lisflood.startfile %}startfile      {{ lisflood.startfile }}
+startelev
+{% endif %}
 latlong
 sgc_enable
 
@@ -23,8 +26,8 @@ massint        1200
 saveint        {{ lisflood.saveint }}
 voutput_max
 hazard
-checkpoint     6
-# netcdf_out   # disabled: segfaults on finalization in this build; use ASCII
+{% if lisflood.checkpoint_h %}checkpoint     {{ lisflood.checkpoint_h }}
+{% endif %}# netcdf_out   # disabled: segfaults on finalization in this build; use ASCII
 
 dirroot        results_{{ name }}
 resroot        res_{{ name }}

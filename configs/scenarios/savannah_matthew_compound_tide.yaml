@@ -33,6 +33,10 @@ domain:
   ref_point: [-81.0903, 31.9522]
 geoclaw:
   refine_box: [-81.150, -80.800, 31.680, 32.244]   # gauge bbox + margin, 439 points
+lisflood:
+  # Edge boundary conditions need a primed start or they are inert (sgc.cpp:1354). Built by
+  # couple.make_startfile --level at the boundary level at tstart; couple.edge_bc reports it.
+  startfile: start_savannah_matthew_compound_tide.asc
 coupling:
   landfall_utc: "2016-10-08T13:00:00"   # GeoClaw t = 0, Matthew closest approach to Savannah
 forcing:
@@ -42,3 +46,13 @@ forcing:
   rain_mode: uniform        # dynamic spatial rain pending the netCDF fix
   infiltration: polaris     # POLARIS soil, Sarhadi-style distributed infiltration
   infil_capped: true        # storage-limited by AWC; needs the patched lisflood binary
+  # The calibrated 30 m run (compound30m/sav_full.par) used infil_nwi_SAV.asc and
+  # infilcap_nwi_SAV.asc, so wetland infiltration WAS masked. The default is false, with a
+  # comment claiming that run was calibrated without it. The par is the record; the comment is
+  # wrong. Leaving this false would not reproduce the 0.181 result.
+  mask_saturated_wetland: true
+
+interventions:
+  # Only used here to give make_infil the wetland footprint for the mask above. This scenario
+  # runs no ensemble.
+  wetlands: data/raw/sagis_savannah/sagis_wetlands_nwi.geojson
