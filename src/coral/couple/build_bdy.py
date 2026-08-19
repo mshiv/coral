@@ -199,7 +199,8 @@ def from_config(cfg, output_dir, bci_in, bdy_out, bci_out, n_coupling=None,
             from ..preprocess.make_tide import from_config as _tide_from_config
             tide_file = _tide_from_config(cfg)
         tide = tide_file
-        surge_baseline = cfg.geoclaw.sea_level
+        # z_base, not the raw datum. See Coupling.mean_offset_m.
+        surge_baseline = cfg.geoclaw.sea_level - cfg.coupling.mean_offset_m
     return build_bdy(output_dir, bci_in, bdy_out, bci_out,
                      n_coupling=n_coupling,
                      dry_thresh=cfg.coupling.dry_thresh,

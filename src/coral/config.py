@@ -97,6 +97,15 @@ class Coupling:
     gauge_spacing_m: float = 400.0
     seaward_cells: int = 3
     datum_offset_m: float = 0.071     # MSL -> NAVD88
+    # Mean water level GeoClaw's barotropic surge does not reproduce: seasonal swelling plus
+    # the post-storm mean. Calibrated against Fort Pulaski, not assumed. The tide-explicit
+    # boundary is eta = surge - z_base + tide, and build_bdy's surge_baseline IS z_base:
+    #     z_base = geoclaw.sea_level - mean_offset_m
+    # With the old sea_level 0.81 this gives 0.42, the value derived in methods 2.4.6, which
+    # brought the boundary to a mean bias of -0.001 m. With sea_level now 0.0 it gives -0.39,
+    # so the offset is added rather than removed. Passing sea_level alone as the baseline, as
+    # the code did, leaves the boundary 0.39 m low.
+    mean_offset_m: float = 0.39
     dry_thresh: float = 0.05
     landfall_s: float = 172800.0      # model-clock time of landfall (bdy/par origin)
     landfall_utc: Optional[str] = None  # calendar anchor for model t=0 (ISO8601),
@@ -172,8 +181,11 @@ class Interventions:
     """Defines the SLR x intervention ensemble for emulator.sweep (first-class + reproducible).
     Knob ranges stay in interventions.generate.INTERVENTIONS; this selects which kinds/levels
     to sample and the SAGIS context data that conditions siting (Phase 2)."""
+    # Must be keys of interventions.generate.INTERVENTIONS. "marsh" was renamed to
+    # "marsh_migration" and __post_init__ rejects the old name, so the stale default made
+    # Interventions(...) fail for any config that set one of the other fields.
     kinds: list[str] = field(default_factory=lambda:
-        ["seawall", "marsh", "living_shoreline", "permeable", "retreat", "depave"])
+        ["seawall", "marsh_migration", "living_shoreline", "retreat", "depave", "road_raise"])
     siting: str = "random"                    # random: training variety; targeted: realistic
     flood_depth: Optional[str] = None         # baseline .max path, drives targeted siting
     flood_zone: Optional[str] = None          # flood-zone polygon geojson, targets retreat/depave
