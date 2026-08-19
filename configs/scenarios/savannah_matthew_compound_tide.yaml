@@ -46,11 +46,12 @@ forcing:
   rain_mode: uniform        # dynamic spatial rain pending the netCDF fix
   infiltration: polaris     # POLARIS soil, Sarhadi-style distributed infiltration
   infil_capped: true        # storage-limited by AWC; needs the patched lisflood binary
-  # The calibrated 30 m run (compound30m/sav_full.par) used infil_nwi_SAV.asc and
-  # infilcap_nwi_SAV.asc, so wetland infiltration WAS masked. The default is false, with a
-  # comment claiming that run was calibrated without it. The par is the record; the comment is
-  # wrong. Leaving this false would not reproduce the 0.181 result.
-  mask_saturated_wetland: true
+  # Wetland infiltration is NOT masked, matching the tide lineage. sav_E1b.par and
+  # sav_tide_fixed.par -- the two runs that conserved mass -- both use the unmasked
+  # infil_matthew_compound.asc. Only the tide-free calibrated run (sav_full.par) used the
+  # NWI-masked infil_nwi_SAV.asc, so masking here would make this run comparable to neither.
+  # Masking is a separate sensitivity worth running once, not a default.
+  mask_saturated_wetland: false
 
 interventions:
   # Only used here to give make_infil the wetland footprint for the mask above. This scenario

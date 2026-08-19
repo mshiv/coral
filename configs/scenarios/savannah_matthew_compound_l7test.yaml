@@ -18,7 +18,7 @@ domain:
 geoclaw:
   amr_max: 7
   refine_box: [-81.150, -80.800, 31.680, 32.244]
-  refine_front_km: 2.5
+  refine_front_km: 1.5     # must match savannah_matthew_compound_l7 or the probe measures a band the real run does not use
   refine_t1_h: -48.0       # t0, so the band is live for the whole probe
   tfinal_h: -45.0          # t0 is -48 h: a 3 h run
 coupling:
