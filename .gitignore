@@ -262,3 +262,9 @@ reports/**/*.png
 
 # generated figures — regenerable from the viz modules
 reports/figures/
+
+# Personal operational runbooks. These are working notes for one cluster account, not
+# documentation, and they were committed once by accident.
+docs/HPC_RUNBOOK_full.md
+docs/RUNBOOK.md
+docs/RUNBOOK_2m.md
