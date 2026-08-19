@@ -35,17 +35,38 @@ from ..viz.pinpoint_style import PALETTE
 RUNUP_TYPES = ("Seed line", "Debris")
 
 
-def score(mxe, dem_header_marks, *, max_quality=None):
-    """[{mark fields, model, resid}] for one run, on a mark list already fetched."""
+def score(mxe, marks, *, max_quality=None, max_dem_diff=None, dem=None):
+    """[{mark fields, model, resid}] for one run, on a mark list already fetched.
+
+    The documented calibration filter is both `quality <= 2` and `|dem - obs| <= 1 m`. The
+    second one drops marks whose surveyed elevation disagrees with the terrain the model is
+    solving on, where a residual says more about the DEM than about the hydraulics. Unfiltered,
+    RMSE is dominated by low-quality marks: methods section 5 reports 0.678 m unfiltered
+    against 0.181 m under both filters.
+    """
     grid, gh = _read_grid(mxe)
-    rows = []
-    for m in dem_header_marks:
+    dg = dh = None
+    if max_dem_diff is not None:
+        if dem is None:
+            raise SystemExit("--max-dem-diff needs the DEM")
+        dg, dh = _read_grid(dem)
+    rows, dropped = [], defaultdict(int)
+    for m in marks:
         if max_quality is not None and (m["quality"] is None or m["quality"] > max_quality):
+            dropped["quality"] += 1
             continue
         mod = _sample(grid, gh, m["lon"], m["lat"])
         if not np.isfinite(mod):
+            dropped["outside/dry"] += 1
             continue
+        if max_dem_diff is not None:
+            z = _sample(dg, dh, m["lon"], m["lat"])
+            if not np.isfinite(z) or abs(z - m["obs"]) > max_dem_diff:
+                dropped["dem-diff"] += 1
+                continue
         rows.append({**m, "model": float(mod), "resid": float(mod - m["obs"])})
+    if dropped:
+        print(f"  dropped {dict(dropped)}")
     return rows
 
 
@@ -62,7 +83,7 @@ def skill(rows):
                 slope=slope, r=r, nse=(1.0 - sse / sst) if sst > 0 else np.nan)
 
 
-def build(runs, dem, out, *, max_quality=None):
+def build(runs, dem, out, *, max_quality=None, max_dem_diff=None):
     """runs is [(label, mxe_path), ...]."""
     import matplotlib
     matplotlib.use("Agg")
@@ -74,7 +95,9 @@ def build(runs, dem, out, *, max_quality=None):
 
     scored = {}
     for label, path in runs:
-        rows = score(path, marks, max_quality=max_quality)
+        print(f"{label}:")
+        rows = score(path, marks, max_quality=max_quality,
+                     max_dem_diff=max_dem_diff, dem=dem)
         if not rows:
             print(f"  {label}: no marks scored, skipping")
             continue
@@ -188,7 +211,11 @@ def main():
     ap.add_argument("--runs", nargs="+", required=True,
                     metavar="LABEL:MXE", help="one or more label:path pairs")
     ap.add_argument("--dem", required=True)
-    ap.add_argument("--max-quality", type=int, default=None)
+    ap.add_argument("--max-quality", type=int, default=None,
+                    help="drop marks above this USGS quality code; the calibration used 2")
+    ap.add_argument("--max-dem-diff", type=float, default=None,
+                    help="drop marks whose surveyed elevation differs from the DEM by more "
+                         "than this; the calibration used 1.0")
     ap.add_argument("--out", default="reports/figures/hwm_compare.png")
     a = ap.parse_args()
     runs = []
@@ -197,7 +224,8 @@ def main():
             raise SystemExit(f"--runs wants LABEL:PATH, got {spec!r}")
         label, path = spec.split(":", 1)
         runs.append((label, path))
-    build(runs, a.dem, a.out, max_quality=a.max_quality)
+    build(runs, a.dem, a.out, max_quality=a.max_quality,
+          max_dem_diff=a.max_dem_diff)
 
 
 if __name__ == "__main__":
