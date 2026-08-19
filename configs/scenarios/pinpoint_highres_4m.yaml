@@ -12,7 +12,13 @@ coupling:
   landfall_utc: "2016-10-08T13:00:00"
   landfall_s: 172800
 lisflood:
-  sim_window_h: [-6, 12]                # ~18 h around landfall (surge peak), not the full 48 h
+  # MUST match pp4_final. The baseline supplies flood_depth for targeted siting and is what
+  # every member is differenced against, so a different window makes the two incomparable. That
+  # is the wall-systems failure: [-6, 12] here against [-6, 18] there.
+  sim_window_h: [-6, 18]
+  # Edge boundary conditions are inert on a dry start (sgc.cpp:1354). Primed from the 30 m parent
+  # by couple.make_startfile, which must be given the same --root and --results as nest_bdy.
+  startfile: start_pinpoint_highres_4m.asc
 forcing:
   rainfall: aorc
   rain_mode: uniform
@@ -30,7 +36,10 @@ forcing:
 #   python -m coral.emulator.sweep --base $PP4 --out runs/pp4_decision \
 #       --config configs/scenarios/pinpoint_highres_4m.yaml --nlcd data/raw/nlcd_pinpoint.tif
 interventions:
-  kinds: [marsh, living_shoreline, seawall, depave, retreat]
+  # Renamed 2026-08-19: marsh split into marsh_restoration and marsh_migration, seawall to
+  # floodwall. The old names no longer load.
+  kinds: [floodwall, marsh_restoration, marsh_migration, living_shoreline, depave, retreat,
+          road_raise]
   slr_levels: [0.0]
   slr_scenarios: [["Low", 2050], ["IntLow", 2050], ["Int", 2050], ["IntHigh", 2050], ["High", 2050], ["Int", 2100], ["High", 2100]]
   #  Two jobs, one axis. The five 2050 scenarios are the DECISION horizon and are where results

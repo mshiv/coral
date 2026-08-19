@@ -26,6 +26,9 @@ coupling:
   landfall_s: 172800
 lisflood:
   sim_window_h: [-6, 18]           # same window as pp4_tide_decision, so the two compare
+  # Members use the same edge boundary as the baseline, and edges are inert on a dry start
+  # (sgc.cpp:1354). sweep must stage this into every member dir alongside the grids.
+  startfile: start_pinpoint_highres_4m.asc
 forcing:
   rainfall: aorc
   rain_mode: uniform
