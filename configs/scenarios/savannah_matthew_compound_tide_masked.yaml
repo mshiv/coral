@@ -1,0 +1,74 @@
+# Matthew 2016 over the extended Savannah domain, everything on at once:
+# surge from GeoClaw, time-varying tide, AORC rainfall, POLARIS infiltration with an AWC cap.
+#
+# The two older scenarios each carry half of this. savannah_matthew_compound has rainfall and
+# infiltration but no tide key, so build_bdy.from_config receives tide=None and writes a pure
+# surge boundary. savannah_matthew_tide has the tide and no rainfall. Neither is the run the
+# dissertation reports.
+#
+# On the datum: geoclaw.sea_level is 0.0 from base.yaml, so the surge series here is a pure
+# residual and build_bdy adds the tide on top as TWL(t) = tide(t) + surge(t). The older runs
+# instead baked 0.81 m into the GeoClaw datum. That constant has no derivation on record; the
+# NOAA comparison shows it was standing in for the antecedent water level the model does not
+# produce, and it overshot. surge_baseline in build_bdy exists to remove such a constant before
+# the tide is added, and here it is 0.0 because there is nothing to remove.
+#
+# Known open item: make_tide fetches the astronomical prediction, so the boundary carries tide
+# plus modelled surge and nothing for the non-tidal antecedent setup. At Fort Pulaski the
+# modelled surge residual is 0.576 m below observed, and that deficit passes through to total
+# water level. Validate the boundary with coral.validate.tide_validation before reading anything
+# into the high-water-mark comparison.
+#
+# Uses the level-6 GeoClaw run. The level-7 run refines only from -8 h to +20 h, and
+# lisflood.sim_window_h here is [-24, 24], so the grid creation and destruction transients at
+# those two times would land inside the window and enter the boundary as spikes.
+name: savannah_matthew_compound_tide_masked
+domain:
+  dem:   data/raw/ga_cudem_30m.tif
+  # Extended 2026-08-17. The old box [31.82, 32.08] walled the Ogeechee (3.3 km) at the south
+  # edge and the Savannah River (5.1 km) at the north, both about 14 km from Pin Point and
+  # inside a tidal excursion of it.
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  refine_box: [-81.150, -80.800, 31.680, 32.244]   # gauge bbox + margin, 439 points
+lisflood:
+  # Edge boundary conditions need a primed start or they are inert (sgc.cpp:1354). Built by
+  # couple.make_startfile --level at the boundary level at tstart; couple.edge_bc reports it.
+  startfile: start_savannah_matthew_compound_tide_masked.asc
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"   # GeoClaw t = 0, Matthew closest approach to Savannah
+forcing:
+  tide: noaa                # time-varying tide, superposed in the .bdy by build_bdy
+  tide_station: "8670870"   # Fort Pulaski
+  rainfall: aorc            # AORC v1.1, natively 1 km over this domain
+  rain_mode: uniform        # dynamic spatial rain pending the netCDF fix
+  infiltration: polaris     # POLARIS soil, Sarhadi-style distributed infiltration
+  infil_capped: true        # storage-limited by AWC; needs the patched lisflood binary
+  # THIS IS THE SENSITIVITY. Everything else matches savannah_matthew_compound_tide.
+  #
+  # The interventions give marsh no infiltration edit, on the grounds that intertidal marsh soil
+  # is saturated when a surge arrives and has no capacity left. Sabeti et al. 2026 Table 2 puts
+  # wetland restoration in the friction and storage row and gives wetlands no infiltration
+  # pathway anywhere. But the BASELINE grid contradicts that: make_infil assigns every marsh cell
+  # the Ksat and AWC its POLARIS soil series reports, which is a texture-based number measured
+  # under drained conditions. So the model lets surge water drain into saturated marsh at a rate
+  # the same physical argument says is unavailable.
+  #
+  # Masking zeroes Ksat and AWC over the NWI wetland footprint, making the baseline consistent
+  # with the intervention. It is a sensitivity rather than the default because it changes results
+  # over a large area and because the two run lineages disagree: the calibrated tide-free run
+  # (sav_full.par) used the masked infil_nwi_SAV.asc while the tide runs that conserve mass
+  # (sav_E1b.par, sav_tide_fixed.par) used the unmasked one.
+  #
+  # Expect depths to RISE, since removing infiltration keeps water on the surface. The unmasked
+  # run already over-predicts high-water marks by +0.17 m, so choosing the unmasked version
+  # because it fits the marks better would be tuning dressed as physics. Report the difference
+  # and choose on the argument.
+  mask_saturated_wetland: true
+
+interventions:
+  # Only used here to give make_infil the wetland footprint for the mask above. This scenario
+  # runs no ensemble.
+  wetlands: data/raw/sagis_savannah/sagis_wetlands_nwi.geojson
