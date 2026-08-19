@@ -1,0 +1,33 @@
+# The static-tide arm of the tide comparison. Identical to savannah_matthew_compound_tide in
+# every respect except that the tide series is held at its window mean instead of varying in
+# time, so the difference between the two runs is the time-varying tide and nothing else.
+#
+# This is not the historical tide-free configuration. That run baked 0.81 m into the GeoClaw
+# datum and used closed edges. At sea_level 0.0 a boundary with no tide and no offset is a pure
+# surge residual, about 1.2 m below observed water level at peak, which would under-flood rather
+# than isolate anything. Holding the tide constant keeps the mean water level right and removes
+# only the oscillation.
+#
+# High-water marks record peak stage only, so they are not where this comparison pays off. The
+# time-varying tide should show in duration, drainage and recession, which a static datum cannot
+# reproduce.
+name: savannah_matthew_compound_statictide
+domain:
+  dem:   data/raw/ga_cudem_30m.tif
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  refine_box: [-81.150, -80.800, 31.680, 32.244]
+lisflood:
+  startfile: start_savannah_matthew_compound_statictide.asc
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+forcing:
+  tide: noaa
+  tide_station: "8670870"
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
+  mask_saturated_wetland: false

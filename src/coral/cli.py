@@ -44,14 +44,19 @@ def render_par(scenario: str, out: str):
 
 @app.command()
 def build_bdy(scenario: str, geoclaw_output: str, bci_in: str, out_dir: str,
-              n_coupling: int = None):
-    """GeoClaw gauges -> .bdy + filtered .bci (filter/sort/shift/datum)."""
+              n_coupling: int = None, tide_file: str = None):
+    """GeoClaw gauges -> .bdy + filtered .bci (filter/sort/shift/datum).
+
+    tide_file overrides the series make_tide would fetch. Pass a constant series to run the
+    static-tide arm of a tide comparison, so the two runs differ only in whether the tide
+    varies in time.
+    """
     c = config.load(scenario)
     os.makedirs(out_dir, exist_ok=True)
     res = _bdy.from_config(c, geoclaw_output, bci_in,
                            os.path.join(out_dir, f"{c.name}.bdy"),
                            os.path.join(out_dir, f"{c.name}_coastline.bci"),
-                           n_coupling=n_coupling)
+                           n_coupling=n_coupling, tide_file=tide_file)
     typer.echo(f"kept {len(res['kept'])} gauges, dropped {len(res['dropped'])}, "
                f"time_offset +{res['time_offset']:.0f}s, bci {res['bci_points']}")
 
