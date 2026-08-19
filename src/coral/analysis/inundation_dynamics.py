@@ -38,7 +38,19 @@ def frames(results_dir):
     return sorted(out)
 
 
-def reduce_run(results_dir, thresh=0.05, saveint=1800.0):
+def land_mask(dem_path, waterline):
+    """Cells above the waterline: the ones whose wetting is a flood rather than the sea.
+
+    Without this, three quarters of a 30 m estuary domain is ocean and permanently wet marsh,
+    duration saturates at the window length in every run, and the metric cannot separate
+    anything. The waterline is datums.mhw, not geoclaw.sea_level.
+    """
+    z, _ = _read_grid(dem_path)
+    z = np.asarray(z, dtype=np.float32)
+    return np.isfinite(z) & (z > waterline) & (z > -9000)
+
+
+def reduce_run(results_dir, thresh=0.05, saveint=1800.0, mask=None):
     """Per-cell duration, peak depth, peak time, recession and dry-spell count.
 
     One pass, one frame in memory at a time. `recession` is the interval from a cell's own peak
@@ -70,6 +82,12 @@ def reduce_run(results_dir, thresh=0.05, saveint=1800.0):
         peak = np.where(newpeak, h, peak)
         last_i = np.where(wet, k, last_i)
 
+    if mask is not None:
+        if mask.shape != shape:
+            raise SystemExit(f"mask {mask.shape} does not match the grid {shape}")
+        n_wet = np.where(mask, n_wet, 0)
+        last_i = np.where(mask, last_i, -1)
+        transitions = np.where(mask, transitions, 0)
     duration_h = n_wet * saveint / 3600.0
     recession_h = np.where(last_i >= 0, (last_i - peak_i) * saveint / 3600.0, np.nan)
     peak = np.where(np.isfinite(peak), peak, 0.0)
@@ -98,15 +116,21 @@ def summarise(name, r, thresh):
                 cycling=float((tr > 1).mean()))
 
 
-def build(runs, out, *, dem=None, thresh=0.05, saveint=1800.0):
+def build(runs, out, *, dem=None, thresh=0.05, saveint=1800.0, waterline=None):
     """runs is [(label, results_dir), ...]."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    mask = None
+    if dem and waterline is not None:
+        mask = land_mask(dem, waterline)
+        print(f"land mask: {int(mask.sum()):,} of {mask.size:,} cells above {waterline} m "
+              f"({100 * mask.mean():.1f}%)\n")
+
     red, stats = {}, {}
     for label, d in runs:
-        red[label] = reduce_run(d, thresh=thresh, saveint=saveint)
+        red[label] = reduce_run(d, thresh=thresh, saveint=saveint, mask=mask)
         stats[label] = summarise(label, red[label], thresh)
         print()
 
@@ -178,6 +202,10 @@ def main():
     ap.add_argument("--thresh", type=float, default=0.05,
                     help="depth counted as wet; matches LISFLOOD's DepthThresh")
     ap.add_argument("--saveint", type=float, default=1800.0)
+    ap.add_argument("--waterline", type=float, default=None,
+                    help="with --dem, restrict to cells above this elevation. Without it the "
+                         "domain is mostly ocean, duration saturates at the window length in "
+                         "every run, and nothing separates. Use datums.mhw (1.114).")
     ap.add_argument("--out", default="reports/figures/inundation_dynamics.png")
     a = ap.parse_args()
     runs = []
@@ -186,7 +214,8 @@ def main():
             raise SystemExit(f"--runs wants LABEL:RESULTS_DIR, got {spec!r}")
         lab, d = spec.split(":", 1)
         runs.append((lab, d))
-    build(runs, a.out, dem=a.dem, thresh=a.thresh, saveint=a.saveint)
+    build(runs, a.out, dem=a.dem, thresh=a.thresh, saveint=a.saveint,
+          waterline=a.waterline)
 
 
 if __name__ == "__main__":
