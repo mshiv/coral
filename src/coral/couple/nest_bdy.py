@@ -251,6 +251,10 @@ if __name__ == "__main__" and not any(
     ap.add_argument("--results", default=None,
                     help="results subdirectory of --coarse to nest from, e.g. results_fullforcing. "
                          "Required when the run directory holds more than one.")
+    ap.add_argument("--root", default="res_matthew_sav",
+                    help="resroot of the coarse run, i.e. the prefix on its output grids. "
+                         "The default is the legacy name; config-driven runs use "
+                         "res_<scenario name>, so a parent built from a scenario needs this.")
     ap.add_argument("--edges", default="SEWN",
                     help="which clip edges get a prescribed stage, e.g. 'SE'. The rest stay "
                          "closed. Prescribing all four (the default, kept for compatibility) "
@@ -258,10 +262,10 @@ if __name__ == "__main__" and not any(
     a = ap.parse_args()
     if a.edge_bc:
         nest_bdy_edges(a.coarse, a.bbox, a.out_bci, a.out_bdy, seg_m=a.seg, edges=a.edges,
-                       results=a.results)
+                       results=a.results, root=a.root)
     else:
         nest_bdy(a.coarse, a.bbox, a.out_bci, a.out_bdy,
-                 spacing_m=a.spacing, edges=a.edges, results=a.results)
+                 spacing_m=a.spacing, edges=a.edges, results=a.results, root=a.root)
 
 
 def snap_bci_to_grid(bci_in, dem_asc, bci_out=None):
