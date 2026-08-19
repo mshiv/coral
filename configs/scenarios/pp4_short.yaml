@@ -1,0 +1,64 @@
+# 4 m Pin Point high-res, nested in the 30 m compound run. Running at 4 m with floored
+# bathymetry and a trimmed surge window makes it actually run: LISFLOOD's timestep is
+# CFL*dx/sqrt(g*h), so deep tidal channels (to 10.6 m at 2 m) collapse it. 4 m + DEM
+# floored at -1 m + an 18 h window is ~50x faster. See docs/adaptation_sampling_plan.md.
+name: pp4_short
+domain:
+  dem:   data/raw/coned_pinpoint_4m_floored.asc   # CoNED resampled to 4 m, floored at -1 m
+  bbox:  [-81.1103, -81.0727, 31.9367, 31.9690]
+  res_m: 4
+  ref_point: [-81.0903, 31.9522]
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+  landfall_s: 172800
+lisflood:
+  # MUST match pp4_final. The baseline supplies flood_depth for targeted siting and is what
+  # every member is differenced against, so a different window makes the two incomparable. That
+  # is the wall-systems failure: [-6, 12] here against [-6, 18] there.
+  # Spin-up test. The nest window need only COVER the reporting window, not equal it. Starting
+  # at -6 h began the run near the surge peak with a very wet primed state and no time for the
+  # solver to settle: the domain reached 9.5 m mean depth with a collapsing timestep. -24 h gives
+  # 18 h of spin-up from a quiescent parent, and still covers [-6, 18] for reporting.
+  sim_window_h: [-6, 18]
+  # Edge boundary conditions are inert on a dry start (sgc.cpp:1354). Primed from the 30 m parent
+  # by couple.make_startfile, which must be given the same --root and --results as nest_bdy.
+  startfile: start_pp4_short.asc
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
+# Decision ensemble on the 4 m grid. Small and targeted rather than broad: these runs answer
+# the site-specific adaptation question for Pin Point, so every intervention is sited by the
+# same flood-depth-ranked rule the community-facing results use, not by random placement.
+#
+# ORDER MATTERS. `flood_depth` is the 4 m baseline run's own .max, so the single baseline run
+# in Phase 4 must finish before this ensemble can be built. It cannot borrow the 30 m .max:
+# targeted siting indexes the depth array with DEM-shaped masks, and sweep now refuses a
+# flood_depth grid whose ncols/nrows differ from the DEM.
+#   export PP4=$SCR/runs/pinpoint_highres_4m         # the finished 4 m baseline
+#   python -m coral.emulator.sweep --base $PP4 --out runs/pp4_decision \
+#       --config configs/scenarios/pinpoint_highres_4m.yaml --nlcd data/raw/nlcd_pinpoint.tif
+interventions:
+  # Renamed 2026-08-19: marsh split into marsh_restoration and marsh_migration, seawall to
+  # floodwall. The old names no longer load.
+  kinds: [floodwall, marsh_restoration, marsh_migration, living_shoreline, depave, retreat,
+          road_raise]
+  slr_levels: [0.0]
+  slr_scenarios: [["Low", 2050], ["IntLow", 2050], ["Int", 2050], ["IntHigh", 2050], ["High", 2050], ["Int", 2100], ["High", 2100]]
+  #  Two jobs, one axis. The five 2050 scenarios are the DECISION horizon and are where results
+  #  are reported, so they are sampled densely. Int and High 2100 extend the range so those
+  #  reporting values sit interior: a network trained only on 0.22-0.42 m would have to
+  #  extrapolate for any later horizon, which is not defensible, and it would break the tool's
+  #  premise that any sea level is free to evaluate. 2070 is omitted -- it lies between the
+  #  cluster and the range and adds nothing.
+  n_per_kind: 25                 # 8 SLR levels x (1 baseline + 5 kinds x 25) = 1008 runs
+  include_combos: false
+  focus_radius_km: 3.0           # tight around Pin Point, matching the validation ensemble
+  seed: 7
+  siting: targeted
+  flood_depth: ${PP4}/results_full/res_pinpoint_highres_4m.max
+  wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
+  soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
+  ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
+  buildings:     data/raw/sagis_pinpoint/fema_structures_pinpoint.geojson
