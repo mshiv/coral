@@ -199,6 +199,11 @@ def from_config(cfg, output_dir, bci_in, bdy_out, bci_out, n_coupling=None,
             from ..preprocess.make_tide import from_config as _tide_from_config
             tide_file = _tide_from_config(cfg)
         tide = tide_file
+        if getattr(cfg.forcing, "tide_static", False):
+            tt, tv = _read_tide(tide) if isinstance(tide, str) else tide
+            import numpy as _np
+            tide = (tt, _np.full_like(tv, float(_np.mean(tv))))
+            print(f"tide held static at the window mean {float(_np.mean(tv)):.4f} m")
         # z_base, not the raw datum. See Coupling.mean_offset_m.
         surge_baseline = cfg.geoclaw.sea_level - cfg.coupling.mean_offset_m
     return build_bdy(output_dir, bci_in, bdy_out, bci_out,

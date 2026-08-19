@@ -1,0 +1,43 @@
+# The control cell of the 2x2 tide-by-rain design: static tide, no rainfall.
+#
+#                      static tide                          time-varying tide
+#   no rain            savannah_matthew_statictide_norain    savannah_matthew_tide_norain
+#   rain               savannah_matthew_compound_statictide  savannah_matthew_compound_tide
+#
+# With all four, the rain and tide effects can be separated and so can their interaction:
+#
+#   rain effect, static tide   = compound_statictide - statictide_norain
+#   rain effect, real tide     = compound_tide       - tide_norain
+#   tide effect, no rain       = tide_norain         - statictide_norain
+#   tide effect, with rain     = compound_tide       - compound_statictide
+#   interaction                = (rain effect, real tide) - (rain effect, static tide)
+#
+# The interaction is the compound signal as a number rather than an argument: if rainfall matters
+# more when the tide is oscillating than when it is held constant, the two forcings are not simply
+# additive. That is the claim the chapter makes, and nothing measures it yet.
+#
+# A note on what "no tide" would mean, since it is tempting to add as a fifth arm. The boundary is
+# eta = surge + mean_offset + tide(t). Dropping the tide entirely leaves eta = surge + 0.39, which
+# differs from this run by 0.130 m of uniform water level, the window mean of the tide. That is a
+# constant offset, not a physics variant, and it is less physical than keeping the mean. The older
+# runs that appear to be tide-free are not: they baked 0.81 m into the GeoClaw datum, which is a
+# static tide at a higher constant.
+name: savannah_matthew_statictide_norain
+domain:
+  dem:   data/raw/ga_cudem_30m.tif
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  refine_box: [-81.150, -80.800, 31.680, 32.244]
+lisflood:
+  startfile: start_savannah_matthew_statictide_norain.asc
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+forcing:
+  tide: noaa
+  tide_station: "8670870"
+  tide_static: true
+  infiltration: polaris
+  infil_capped: true
+  mask_saturated_wetland: false

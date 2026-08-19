@@ -26,6 +26,7 @@ coupling:
 forcing:
   tide: noaa
   tide_station: "8670870"
+  tide_static: true
   rainfall: aorc
   rain_mode: uniform
   infiltration: polaris

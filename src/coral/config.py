@@ -151,6 +151,12 @@ class Forcing:
     #                                   When set, GeoClaw runs at MSL and the time-varying
     #                                   tide is added onto the surge in the .bdy (make_tide.py).
     tide_station: str = "8670870"     # NOAA CO-OPS station id (Fort Pulaski, GA)
+    # Hold the tide at its window mean instead of letting it vary. The control arm of the
+    # tide comparison: same mean water level, no oscillation, so the difference against a
+    # varying run is the tide's time dependence and nothing else. Was previously done by
+    # passing --tide-file at build time, which left no record in the config and would have
+    # silently produced a varying tide on any rebuild.
+    tide_static: bool = False
     slr_m: float = 0.0
     # Salt marsh soil is at or near saturation through the tidal cycle, so the conductivity and
     # storage a soil survey reports for it are unavailable when a surge arrives. Setting this
