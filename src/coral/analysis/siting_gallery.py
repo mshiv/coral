@@ -28,9 +28,12 @@ import numpy as np
 from ..emulator.dataset import read_asc
 from ..interventions.generate import sample_intervention, apply_intervention
 
-KINDS = ["seawall", "living_shoreline", "marsh", "depave", "retreat"]
+KINDS = ["floodwall", "living_shoreline", "marsh_restoration", "marsh_migration",
+         "depave", "retreat", "road_raise"]
 # Which grid each kind edits most visibly, and a label for the colour bar.
-FIELD = {"seawall": ("dem", "DEM raised (m)"),
+FIELD = {"floodwall": ("dem", "DEM raised (m)"),
+         "seawall": ("dem", "DEM raised (m)"),        # legacy manifests
+         "road_raise": ("dem", "DEM raised (m)"),
          "retreat": ("dem", "DEM change (m)"),
          "living_shoreline": ("manning", "Manning n change"),
          "marsh": ("manning", "Manning n change"),

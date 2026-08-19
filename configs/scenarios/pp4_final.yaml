@@ -32,17 +32,36 @@ forcing:
   infiltration: polaris
   infil_capped: true
 interventions:
-  kinds: [seawall, marsh_migration, living_shoreline, depave, retreat, road_raise]
+  # Seven kinds. marsh is split: restoration acts on the existing platform (MLW to MHW,
+  # available today), migration on the band the tide advances into (MHW to MHW+SLR). They were
+  # one kind, and random siting placed on the platform while targeted placed in the band, so the
+  # training and decision ensembles encoded different interventions under one label.
+  # `permeable` is gone: Ksat-only on developed land, which depave already does on a stricter
+  # zone with roughness and storage too, and it had no targeted-siting branch.
+  kinds: [floodwall, marsh_restoration, marsh_migration, living_shoreline, depave, retreat,
+          road_raise]
+  # Wall counts stratified over these sizes rather than drawn at random, so each size gets equal
+  # coverage. The emulator sees edited terrain, not a wall count, so this is about spanning the
+  # space of edited fields; effect sizes are reported conditioned on count rather than weighted
+  # by an assumed prior about what would be built.
+  seawall_walls: [1, 2, 3, 5]
   slr_levels: [0.0]
   slr_scenarios: [["Low", 2050], ["IntLow", 2050], ["Int", 2050], ["IntHigh", 2050], ["High", 2050], ["Int", 2100], ["High", 2100]]
   # Reporting happens at the 2050 horizon, so those five are sampled densely. Int and High 2100
   # extend the range so the reported values sit interior. The High2100 hold-out is not run as a
   # test: predicting above the trained range is extrapolation and fails as expected.
-  n_per_kind: 20
+  # 30 gives, per kind per SLR level, 21 random and 9 targeted members.
+  n_per_kind: 30
   include_combos: true
   focus_radius_km: 3.0             # scoping choice, tight around Pin Point
   seed: 23                         # different from 7 and 11, so alignments differ
-  siting: targeted
+  # Both, in one ensemble. Random members give the placement variety the emulator needs, since a
+  # user can draw anywhere including somewhere useless, and a model trained only on effective
+  # placements will report a benefit for a wall that would do nothing. Targeted members are what
+  # the decision results are read from. Recorded per member in the manifest, which also enables
+  # the hold-out that matters: train on random, test on targeted.
+  siting: mixed
+  targeted_frac: 0.3
   flood_depth: ${CLEAN}/res_pinpoint_highres_4m.max
   wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
   soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson

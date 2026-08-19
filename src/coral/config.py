@@ -200,8 +200,19 @@ class Interventions:
     # "marsh_migration" and __post_init__ rejects the old name, so the stale default made
     # Interventions(...) fail for any config that set one of the other fields.
     kinds: list[str] = field(default_factory=lambda:
-        ["seawall", "marsh_migration", "living_shoreline", "retreat", "depave", "road_raise"])
-    siting: str = "random"                    # random: training variety; targeted: realistic
+        ["floodwall", "marsh_restoration", "marsh_migration", "living_shoreline",
+         "retreat", "depave", "road_raise"])
+    # random  : Gaussian-field patches anywhere in the kind's zone. Placement variety, which is
+    #           what the emulator needs: a user can draw anywhere, including somewhere useless,
+    #           and a model trained only on effective placements will report a benefit for a
+    #           wall that would do nothing.
+    # targeted : the top cells by siting.suitability_score. Realistic, and what the decision
+    #           results are reported from.
+    # mixed    : both in one ensemble, `targeted_frac` of members targeted, recorded per member.
+    #           Enables the hold-out that matters: train on random, test on targeted, i.e. does a
+    #           model that learned from arbitrary placements predict the one a planner picks.
+    siting: str = "random"
+    targeted_frac: float = 0.3                # only used when siting == "mixed"
     flood_depth: Optional[str] = None         # baseline .max path, drives targeted siting
     flood_zone: Optional[str] = None          # flood-zone polygon geojson, targets retreat/depave
     slr_levels: list[float] = field(default_factory=lambda: [0.0, 0.3, 0.6, 1.0, 1.5])
@@ -230,6 +241,9 @@ class Interventions:
         bad = [k for k in self.kinds if k not in INTERVENTIONS]
         if bad:
             raise ValueError(f"interventions.kinds {bad} not in {sorted(INTERVENTIONS)}")
+        _require(self.siting, {"random", "targeted", "mixed"}, "interventions.siting")
+        if not 0.0 <= self.targeted_frac <= 1.0:
+            raise ValueError("interventions.targeted_frac must be between 0 and 1")
 
 @dataclass
 class Scenario:

@@ -27,7 +27,8 @@ import numpy as np
 from .building_exposure import read_depth
 
 # which grid carries the intervention's primary signal
-PRIMARY = {"seawall": "dem", "retreat": "dem"}          # elevation edits; everything else is n
+PRIMARY = {"floodwall": "dem", "seawall": "dem", "road_raise": "dem", "retreat": "dem"}
+#          elevation edits; everything else is n. "seawall" kept for legacy manifests.
 GRIDS = {"dem": "SUB_DEM*.asc", "manning": "Manning*.asc",
          "ksat": "infil_*.asc", "awc": "infilcap_*.asc"}
 
@@ -327,7 +328,7 @@ def seawall_figures(ensemble_dir, base_dir, buildings_geojson, out_png, *,
 
     ens = Path(ensemble_dir)
     manifest = json.load(open(ens / "manifest.json"))
-    picks = pick_samples(manifest, kinds=["seawall"], per_kind=per_kind, seed=seed)
+    picks = pick_samples(manifest, kinds=["floodwall", "seawall"], per_kind=per_kind, seed=seed)
     if not picks:
         raise SystemExit("no seawall members matched; check the manifest kinds")
 

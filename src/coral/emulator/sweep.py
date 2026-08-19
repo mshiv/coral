@@ -70,7 +70,8 @@ def _sample_wall_count(rng, walls):
     return int(rng.choice(ks, p=(1.0 / ks) / (1.0 / ks).sum()))
 
 
-def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0, seawall_walls=None):
+def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0,
+               seawall_walls=None, siting="random", targeted_frac=0.3):
     """Build the sweep spec: baseline + single interventions x SLR (+ optional
     pairwise combos). Returns a list of {name, slr_m, slr_label, interventions:[knobs,...]}.
 
@@ -86,6 +87,33 @@ def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0, sea
     alignments so a member really contains N different walls.
     """
     rng = np.random.default_rng(seed)
+
+    def _siting_for(i, n):
+        """Siting mode for member i of n within one kind and SLR level.
+
+        Assigned by position rather than by coin flip, so the requested fraction is exact in
+        every cell of the design instead of only in expectation. With 30 members and 0.3 that is
+        9 targeted every time, not 9 on average.
+        """
+        if siting != "mixed":
+            return siting
+        return "targeted" if i < int(round(targeted_frac * n)) else "random"
+
+    def _wall_counts(n):
+        """Wall counts for n members, stratified over the listed sizes.
+
+        A list means "cover these sizes", and drawing it at random gives a multinomial spread:
+        the existing 128-member run came out 37/29/28/26 rather than 32 each. Cycling gives the
+        balance the list was asking for. An int keeps the 1/k weighting, which is a statement
+        about what is buildable and is meant to be uneven.
+        """
+        if not seawall_walls:
+            return [1] * n
+        if isinstance(seawall_walls, (list, tuple)):
+            ks = [int(w) for w in seawall_walls if int(w) >= 1] or [1]
+            return [ks[i % len(ks)] for i in range(n)]
+        return [_sample_wall_count(rng, seawall_walls) for _ in range(n)]
+
     specs = []
     for entry in slr_levels:
         if isinstance(entry, (tuple, list)):
@@ -94,24 +122,25 @@ def plan_sweep(slr_levels, kinds, n_per_kind=4, include_combos=True, seed=0, sea
             label, slr = None, entry
         tag = label if label is not None else slr
         specs.append({"name": f"slr{tag}_base", "slr_m": slr, "slr_label": label,
-                      "interventions": []})
+                      "siting": None, "interventions": []})
         for kind in kinds:
+            walls = _wall_counts(n_per_kind) if kind in ("floodwall", "seawall") else None
             for j in range(n_per_kind):
                 kb = sample_intervention(kind, rng)
-                if kind == "seawall" and seawall_walls:
-                    n_walls = _sample_wall_count(rng, seawall_walls)
+                if walls and seawall_walls:
+                    n_walls = walls[j]
                     kb["wall_slot"] = 0
                     knobs = [kb] + [dict(sample_intervention(kind, rng), wall_slot=s)
                                     for s in range(1, n_walls)]
                 else:
                     knobs = [kb]
                 specs.append({"name": f"slr{tag}_{kind}{j}", "slr_m": slr, "slr_label": label,
-                              "interventions": knobs})
+                              "siting": _siting_for(j, n_per_kind), "interventions": knobs})
         if include_combos:                       # a few multi-intervention configs
             for j in range(n_per_kind):
                 combo = [sample_intervention(k, rng) for k in rng.choice(kinds, 2, replace=False)]
                 specs.append({"name": f"slr{tag}_combo{j}", "slr_m": slr, "slr_label": label,
-                              "interventions": combo})
+                              "siting": _siting_for(j, n_per_kind), "interventions": combo})
     return specs
 
 
@@ -278,6 +307,11 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         # coastline that run never has, and pinned marsh to the present-day intertidal zone
         # instead of letting it migrate inland as the sea rises.
         member_sea_level = sea_level + float(spec.get("slr_m", 0.0))
+        # Siting is per member, not per ensemble. Under `mixed` some members are placed at the
+        # top-scoring cells and the rest anywhere in the zone, so one ensemble carries both the
+        # placement variety the emulator needs and the realistic placements the decision results
+        # are read from. Falls back to the ensemble-wide setting for specs built before this.
+        member_place = spec.get("siting") or place
         # Member index, so floodwall alignments are drawn without replacement: N members get N
         # distinct alignments instead of N independent draws that can repeat. Multi-wall members
         # step the index by _WALL_STRIDE per wall slot, so each knob draws its own alignment and
@@ -291,7 +325,7 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
                                                         roads=roads,
                                                         slr_buffer=float(spec.get("slr_m", 0.0)) or 0.5,
                                                         mhw=mhw, mlw=mlw,
-                                                        buildings=buildings, place=place,
+                                                        buildings=buildings, place=member_place,
                                                         flood_depth=flood_depth, flood_zone=flood_zone,
                                                         res_m=res_m)
         stage_grid(dem, dem0, dem_p, run / dem_p.name)
@@ -320,7 +354,11 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         # Absolute, matching run_dirs.txt. A relative run_dir only resolves from the repo
         # root, so any tool run from the ensemble directory itself reports every member as
         # absent, which looks like total data loss rather than a path bug.
+        # `siting` is recorded per member because the decision results must be filtered to the
+        # targeted ones, and because train-on-random/test-on-targeted is the hold-out that asks
+        # whether a model learned from arbitrary placements predicts the one a planner picks.
         manifest.append({"name": spec["name"], "run_dir": str(run.resolve()), "root": root,
+                         "siting": member_place if spec["interventions"] else None,
                          "forcing": forcing, "interventions": spec["interventions"]})
 
     json.dump(manifest, open(out_root / "manifest.json", "w"), indent=2)
@@ -491,7 +529,8 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
         targets = [(scen, year) for scen, year in iv.slr_scenarios]
         slr_levels_all += resolve_slr_scenarios(targets, station=cfg.forcing.tide_station)
     specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed,
-                       seawall_walls=iv.seawall_walls)
+                       seawall_walls=iv.seawall_walls, siting=iv.siting,
+                       targeted_frac=iv.targeted_frac)
     # The tidal frame comes from the scenario so the migration band, the roughness threshold
     # and the shoreline contour cannot drift apart.
     #
@@ -525,7 +564,8 @@ if __name__ == "__main__":
     # rejected by Interventions.__post_init__, so the stale default failed on any call that
     # omitted --kinds.
     ap.add_argument("--kinds", nargs="+",
-                    default=["seawall", "marsh_migration", "living_shoreline", "depave",
+                    default=["floodwall", "marsh_restoration", "marsh_migration",
+                             "living_shoreline", "depave",
                              "retreat", "road_raise"])
     ap.add_argument("--n-per-kind", type=int, default=4)
     a = ap.parse_args()

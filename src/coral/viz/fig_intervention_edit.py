@@ -21,7 +21,7 @@ from ..emulator.dataset import read_asc
 from ..interventions.generate import sample_intervention, apply_intervention
 from .pinpoint_style import PALETTE, base_map, add_vector, panel_title, extent_of
 
-KINDS = [("seawall", "Seawall", "a hard step along the shoreline"),
+KINDS = [("floodwall", "Floodwall", "a hard step along the shoreline"),
          ("marsh", "Marsh restoration", "roughness up, elevation unchanged"),
          ("living_shoreline", "Living shoreline", "a low sill with marsh behind it"),
          ("depave", "De-pave", "infiltration up, surface unchanged")]

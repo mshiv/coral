@@ -8,7 +8,7 @@ generate.apply_intervention(place="targeted") places at the top-scoring cells.
 
 Drivers per kind (see the plan): marsh uses migration space adjacent to NWI marsh within the
 tidal frame; living_shoreline uses the marsh-water edge; depave uses flooded/upstream impervious
-on permeable soil; retreat uses buildings with the deepest modeled flooding in the flood zone;
+on suitable soil; retreat uses buildings with the deepest modeled flooding in the flood zone;
 seawall uses shoreline seaward of flooded buildings at low crest.
 
 Reuses hydrology (flow_accum/catchment/hydraulic_connectivity) and scipy.ndimage. Tidal-frame
@@ -27,11 +27,19 @@ def _norm(a):
     return np.nan_to_num((a - lo) / (hi - lo))
 
 
-def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=None,
+def suitability_score(dem, kind, *, sea_level=None, wetlands=None, buildings=None,
                       roads=None, flood_depth=None, flood_zone=None, classes=None,
-                      soil_ksat=None, focus=None, mhw=0.94, mlw=-1.17, slr_buffer=0.5,
+                      soil_ksat=None, focus=None, mhw=None, mlw=None, slr_buffer=0.5,
                       res_m=30.0):
-    """Per-cell suitability in [0,1] for `kind`; 0 outside its zone. Higher = better target."""
+    """Per-cell suitability in [0,1] for `kind`; 0 outside its zone. Higher = better target.
+
+    sea_level, mhw and mlw have no defaults on purpose. They previously defaulted to 0.81 and the
+    published 1983-2001 datums, both superseded: 0.81 has no derivation on record and the
+    published epoch is centred on 1992. Pass the scenario's datums.
+    """
+    if sea_level is None or mhw is None or mlw is None:
+        raise ValueError("suitability_score needs sea_level, mhw and mlw from the scenario "
+                         "datums; they no longer fall back to the superseded epoch")
     from scipy import ndimage
     def _win(metres, minimum=3):        # metres to an odd cell window for the filters below
         c = max(minimum, int(round(metres / res_m)))
@@ -41,7 +49,16 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
     s = np.zeros(dem.shape, "float64")
     NLCD_DEV = (21, 22, 23, 24); NLCD_IMP = (22, 23, 24)
 
-    if kind == "marsh_migration":
+    if kind == "marsh_restoration":
+        # The existing platform, MLW to MHW. Rank by exposure to open water, since the marsh that
+        # does the most work against a surge is the marsh the surge has to cross.
+        band = np.isfinite(dem) & (dem >= mlw) & (dem <= mhw)
+        if wetlands is not None:
+            band = band & wetlands
+        exposure = ndimage.uniform_filter(sea.astype(float), size=_win(300.0))
+        s = np.where(band, _norm(exposure) + 0.1, 0.0)
+
+    elif kind == "marsh_migration":
         # Migration space: land landward-adjacent to existing marsh, within [MHW, MHW+SLR].
         # slr_buffer must be the member's own rise, not a constant. Migration space is defined
         # by how far the tide advances, so a fixed 0.5 m gave a Low2050 member and a High2100
@@ -98,7 +115,7 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
         else:
             s = np.where(band, _norm(-(dem)), 0.0)      # lowest road first
 
-    elif kind == "seawall":
+    elif kind in ("floodwall", "seawall"):
         shore = ndimage.binary_dilation(sea, iterations=max(1,int(round(60.0/res_m)))) & land
         landward_flood = ndimage.maximum_filter(flood_depth, size=_win(450.0)) if flood_depth is not None else np.zeros(dem.shape)
         lowcrest = _norm(-(dem))                                  # low points overtop first
@@ -112,7 +129,10 @@ def suitability_score(dem, kind, *, sea_level=0.81, wetlands=None, buildings=Non
     return s
 
 
-def intertidal_mask(dem, *, mlw=-1.17, mhw=0.94, slr_buffer=0.5, nlcd=None, nwi=None):
+def intertidal_mask(dem, *, mlw=None, mhw=None, slr_buffer=0.5, nlcd=None, nwi=None):
+    """Intertidal band from the tidal frame. mlw and mhw are required; see suitability_score."""
+    if mlw is None or mhw is None:
+        raise ValueError("intertidal_mask needs mlw and mhw from the scenario datums")
     """Marsh footprint from the tidal frame, filtered by land cover.
 
     Neither land-cover source works alone here. NWI maps 2.4% of the Pin Point clip as

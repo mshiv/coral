@@ -33,7 +33,7 @@ NLCD_IMPERVIOUS = (22, 23, 24)          # parking lots / roads / dense developme
 
 def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=None,
                      elev_band=2.0, near_water_m=450.0, wetlands=None, buildings=None,
-                     res_m=30.0):
+                     res_m=30.0, mhw=None, mlw=None, slr_buffer=0.5):
     """Physically- and contextually-suitable zone for an intervention.
 
     - marsh_migration: real marsh footprint. If a `wetlands` mask (from NWI, via
@@ -43,7 +43,7 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
       wetland classes.
     - retreat: built land. Real building footprints (`buildings` mask from FEMA USA
       Structures) intersect developed, else NLCD developed, else elevation fallback.
-    - permeable: developed land; depave: impervious/parking land.
+    - depave: impervious/parking land.
     `focus` (bool mask, e.g. the Pin Point neighbourhood from focus_region) intersects
     the result so interventions sit around the focal community (up/downstream).
     Falls back to elevation-only heuristics when classes, wetlands, and buildings are all unset.
@@ -52,8 +52,29 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
     near_water_cells = max(1, int(round(near_water_m / res_m)))   # metres to cells
     land = np.isfinite(dem) & (dem > sea_level)
     sea = np.isfinite(dem) & (dem <= sea_level)
-    if kind == "marsh_migration":
-        if wetlands is not None:                         # real NWI marsh footprint
+    if kind == "marsh_restoration":
+        # The existing platform: marsh footprint within the tidal frame, MLW to MHW. Wet on most
+        # tides, available today, no sea-level rise required.
+        if wetlands is not None:
+            z = np.isfinite(dem) & wetlands
+            if mlw is not None and mhw is not None:
+                z = z & (dem >= mlw) & (dem <= mhw)
+        else:
+            z = (np.isfinite(dem) & (dem >= (mlw if mlw is not None else sea_level - 2.0))
+                 & (dem <= (mhw if mhw is not None else sea_level)))
+            if classes is not None:
+                z = z & np.isin(classes, NLCD_WETLAND)
+    elif kind == "marsh_migration":
+        # Migration space: land the tide reaches as it advances, MHW to MHW + the member's own
+        # rise. Random and targeted siting must agree on this; they did not before 2026-08-19,
+        # when random placed on the existing platform (restoration) and targeted placed here.
+        if mhw is not None:
+            z = (np.isfinite(dem) & (dem > mhw) & (dem <= mhw + slr_buffer))
+            if classes is not None:
+                z = z & ~np.isin(classes, NLCD_DEVELOPED)
+            if buildings is not None:
+                z = z & ~buildings
+        elif wetlands is not None:
             z = np.isfinite(dem) & wetlands
         else:
             z = (land & (dem <= sea_level + elev_band)
@@ -76,11 +97,24 @@ def suitability_mask(dem, sea_level=0.81, *, kind="marsh", classes=None, focus=N
         else:
             z = land & (dem > sea_level + 0.5)
     elif kind == "living_shoreline":                     # marsh-water edge
-        z = (wetlands & ndimage.binary_dilation(sea, iterations=1)) if wetlands is not None \
-            else (sea & ndimage.binary_dilation(land, iterations=1))
-    elif kind == "permeable":
-        z = (land & np.isin(classes, NLCD_DEVELOPED)) if classes is not None \
-            else (land & (dem > sea_level + 0.5))
+        # The edge must follow the member's own water level. Intersecting a FIXED NWI footprint
+        # with a rising waterline shrinks the zone to nothing by about 1 m of rise, so the
+        # intervention silently disappeared at the higher SLR levels. Marsh migrates, and a sill
+        # would be built at the new edge, so the zone is the intertidal band in the member's
+        # tidal frame, narrowed to real marsh where a land-cover or NWI layer says so.
+        if mhw is not None and mlw is not None:
+            z = np.isfinite(dem) & (dem >= mlw) & (dem <= mhw + slr_buffer)
+            near = ndimage.binary_dilation(sea, iterations=max(1, near_water_cells // 3))
+            z = z & near
+            if wetlands is not None and wetlands.any():
+                grown = ndimage.binary_dilation(wetlands, iterations=near_water_cells)
+                z = z & grown
+            elif classes is not None:
+                z = z & ndimage.binary_dilation(np.isin(classes, NLCD_WETLAND),
+                                                iterations=near_water_cells)
+        else:
+            z = (wetlands & ndimage.binary_dilation(sea, iterations=1)) if wetlands is not None \
+                else (sea & ndimage.binary_dilation(land, iterations=1))
     elif kind == "depave":
         z = (land & np.isin(classes, NLCD_IMPERVIOUS)) if classes is not None \
             else (land & (dem > sea_level + 0.5))
@@ -104,6 +138,23 @@ def focus_region(dem_shape, ext, center_lonlat, radius_km):
     dx = (lon[None, :] - clon) * 111.0 * np.cos(np.radians(clat))
     dy = (lat[:, None] - clat) * 111.0
     return (dx ** 2 + dy ** 2) <= radius_km ** 2
+
+
+def _nanmean_filter(a, win):
+    """Mean of the finite values in a `win`-cell box around each cell, NaN where none.
+
+    Used to regrade a cleared footprint to the ground around it. A plain uniform_filter would
+    treat the footprint's own NaNs as zeros and pull the target down toward sea level, which is
+    the failure this replaces.
+    """
+    from scipy import ndimage
+    good = np.isfinite(a)
+    filled = np.where(good, a, 0.0)
+    tot = ndimage.uniform_filter(filled, size=win, mode="nearest")
+    cnt = ndimage.uniform_filter(good.astype("float64"), size=win, mode="nearest")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.where(cnt > 0, tot / np.maximum(cnt, 1e-12), np.nan)
+    return out
 
 
 def patch_mask(shape, corr_len=30.0, area_frac=0.15, seed=0, restrict=None):
@@ -382,6 +433,13 @@ def seawall_line_mask(dem, shape, *, crest_m, length_m, res_m, sea_level=0.81,
     return ndimage.binary_dilation(m, iterations=w)
 
 
+# A living-shoreline sill is a low structure at the marsh toe, not an embankment. Georgia and
+# NOAA guidance sets the crest relative to MHW, so the crest follows the member's water level,
+# but a crest is only buildable where the bed is close enough to it. 1.0 m is the deepest lift
+# treated as a sill; deeper cells at the marsh-water edge get the roughness edit and no crest.
+# ASSUMED, not sourced.
+SILL_MAX_RISE_M = 1.0
+
 INTERVENTIONS = {
     # Spatial knobs are in METRES and are divided by the grid cell size at apply time, so the
     # same registry gives the same physical intervention at 30 m and at 4 m. Values below
@@ -400,7 +458,7 @@ INTERVENTIONS = {
     # BFE-plus-freeboard wall, and a major surge barrier. Charleston's Low Battery was raised to
     # about 2.74 m NAVD88 and the USACE peninsula proposal is about 3.66 m, both of which land
     # inside this band once the local ground elevation is added.
-    "seawall":   {"crest_above_water_m": (1.2, 3.7), "length_m": (200, 1500)},
+    "floodwall": {"crest_above_water_m": (1.2, 3.7), "length_m": (200, 1500)},
     # Roughness bands widened DOWNWARD on 2026-08-03 to cover the observed distribution.
     # Arefin et al. (2026), Est. Coast. Shelf Sci. 334, 109791, meta-analyse 36 studies and
     # report a saltmarsh Manning's n interquartile range of 0.04-0.08 and a mangrove IQR of
@@ -423,6 +481,22 @@ INTERVENTIONS = {
     # 10-40 mm/hr raised marsh benefit for a process that does not occur.
     "marsh_migration": {"area_frac": (0.05, 0.30), "n_target": (0.03, 0.16),
                   "corr_len_m": (450, 1500)},
+    # Restoration is a different intervention from migration and was previously conflated with
+    # it: random siting placed on the existing NWI marsh (restoration) while targeted siting
+    # placed in the band above MHW (migration), both under one name. So the 1506-member training
+    # ensemble is restoration and the decision ensembles are migration, which is a train/deploy
+    # mismatch rather than a naming problem.
+    #
+    # Restoration acts on the existing platform between MLW and MHW, wet on most tides, and is
+    # available today without any sea-level rise. Migration acts on upland that becomes marsh as
+    # the tide advances, and is contingent on SLR and preventable by coastal squeeze.
+    #
+    # n_target starts at 0.06 rather than the migration band's 0.03 because the edit is
+    # max(n, n_target) applied to cells that are already marsh: a target below the existing
+    # roughness is a no-op. 0.06 is near the middle of Arefin's saltmarsh IQR (0.04-0.08), so the
+    # range spans modest densification to dense mature marsh.
+    "marsh_restoration": {"area_frac": (0.05, 0.40), "n_target": (0.06, 0.16),
+                  "corr_len_m": (450, 1500)},
     #            Chow (1959) puts the 0.16 end at "medium to dense brush, summer"; the 0.03 end
     #            is young or sparse Spartina, below the saltmarsh IQR floor.
     # Mangrove was dropped. Pin Point is 31.95 N and the poleward Georgia records sit near
@@ -435,12 +509,18 @@ INTERVENTIONS = {
     #            applies. sill_m is UNSOURCED as an absolute rise: NOAA and Georgia guidance set
     #            the sill crest relative to MHW rather than as a fixed height above bed.
 
-    "permeable": {"area_frac": (0.05, 0.25), "ksat_rate": (20, 60), "corr_len_m": (300, 1200)},
+    # `permeable` was removed 2026-08-19. It edited Ksat only, on NLCD developed land, which
+    # `depave` already does on a stricter zone with roughness and storage as well. It also had no
+    # branch in siting.suitability_score, so under targeted siting it scored all land uniformly.
+    # A broken near-duplicate invites a question it cannot answer.
     # natural_n is supported by Chow's pasture and cleared-land classes, 0.025-0.050.
     # ksat_rate and awc_add mirror depave. Clearing a structure removes its roof, driveway and
     # slab, so the ground under it drains like the depaved surface it becomes. Leaving ksat at
     # the developed value modelled demolition that changed roughness and elevation but left the
     # site as impervious as before.
+    # ASSUMED, not sourced: ksat_rate (mm/hr) and awc_add (mm) here and in depave. The SSURGO
+    # cap in apply_intervention binds the achievable rate to real soil, so the edit cannot exceed
+    # what the ground allows, but the target itself has no citation. natural_n is sourced.
     "retreat":   {"area_frac": (0.02, 0.12), "natural_n": (0.035, 0.05),
                   "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len_m": (300, 900)},
     # Chow (1959) floodplain classes: short-grass pasture 0.025-0.035, high grass 0.030-0.050,
@@ -454,8 +534,9 @@ INTERVENTIONS = {
     # embankment also gives the ensemble a sharp overtopping threshold, which a roughness field
     # cannot produce and which the emulator needs to see.
     #
-    # crest_above_water_m is UNSOURCED as a range. It should be set from the Chatham County
-    # freeboard rule against the local BFE once that is read, not chosen here.
+    # ASSUMED, not sourced: crest_above_water_m. It should come from the Chatham County freeboard
+    # rule against the local BFE once that is read. The freeboard FORM is right (see floodwall);
+    # only the range is a guess.
     "road_raise": {"crest_above_water_m": (1.0, 3.0), "length_m": (200, 1200)},
 }
 
@@ -507,21 +588,29 @@ def sample_intervention(kind, rng, *, by_height=False):
     return knobs
 
 
-def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
+def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=None,
                        classes=None, focus=None, wetlands=None, soil_ksat=None,
                        buildings=None, roads=None, place="random", flood_depth=None,
                        flood_zone=None,
-                       mhw=0.94, mlw=-1.17, slr_buffer=0.5, res_m=30.0):
+                       mhw=None, mlw=None, slr_buffer=0.5, res_m=30.0):
     """Expand one config onto copies of the grids. `classes` = optional NLCD grid.
     SAGIS-conditioned siting (context_rasters.py): `wetlands` (NWI mask, so marsh sits
     on real marsh), `buildings` (FEMA footprints, so retreat acts on real structures),
-    `soil_ksat` (SSURGO Ksat grid, mm/hr, so de-pave/permeable can't exceed what the soil
+    `soil_ksat` (SSURGO Ksat grid, mm/hr, so de-pave can't exceed what the soil
     physically allows). `focus` = optional bool mask (Pin Point neighbourhood).
 
     `place`: "random" = Gaussian-field patches within the zone (training variety); "targeted"
     = rank by siting.suitability_score using `flood_depth` (baseline .max), `flood_zone`, and
     the tidal frame (`mhw`/`mlw`/`slr_buffer`), for realistic decision scenarios. Returns
     (dem, manning, ksat, awc, intensity); intensity marks the edited cells."""
+    # These used to default to sea_level 0.81 and the published 1983-2001 datums (mhw 0.94,
+    # mlw -1.17). 0.81 has no derivation on record, and the published epoch is centred on 1992,
+    # which sits below the sea level a 2016 event had. sweep passes datums.mhw (1.114) and
+    # datums.mlw (-1.091); a direct call must supply them rather than inherit a superseded guess.
+    if sea_level is None or mhw is None or mlw is None:
+        raise ValueError("apply_intervention needs sea_level, mhw and mlw. Pass the scenario's "
+                         "datums (datums.mhw is the waterline; geoclaw.sea_level is the run "
+                         "datum and is not it).")
     from scipy import ndimage
     dem, manning = dem.copy(), manning.copy()
     ksat, awc = ksat.copy(), awc.copy()
@@ -544,7 +633,8 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
         return suitability_mask(dem, sea_level, kind=k, classes=classes, focus=focus,
                                 elev_band=knobs.get("elev_band", 2.0),
                                 near_water_m=knobs.get("near_water_m", 450.0),
-                                wetlands=wetlands, buildings=buildings, res_m=res_m)
+                                wetlands=wetlands, buildings=buildings, res_m=res_m,
+                                mhw=mhw, mlw=mlw, slr_buffer=slr_buffer)
 
     def place_mask(k):
         """Placement cells for kind k: random Gaussian patches within the zone, or the
@@ -565,7 +655,7 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
         return patch_mask(dem.shape, m_to_cells(knobs.get("corr_len_m", 900.0)),
                           knobs.get("area_frac", 0.1), knobs.get("seed", 0), restrict=zone(k))
 
-    if kind == "seawall":
+    if kind in ("floodwall", "seawall"):
         if knobs.get("seawall_line", True):
             # Eligible shoreline: buildings if available, else the focus region. Without one of
             # these the wall lands on whichever islet has the longest outline.
@@ -589,17 +679,19 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
                 print(f"  no tie-in alignment found after 12 attempts (seed "
                       f"{knobs.get('seed')}); member has no floodwall")
         else:
-            m = place_mask("seawall")                     # legacy near-shore band
+            m = place_mask("floodwall")                   # legacy near-shore band
         dem[m] = np.maximum(dem[m], crest)
         # A wall is impervious and hydraulically smooth relative to marsh or vegetated ground.
         # Leaving n at its land-cover value would let a concrete structure retain marsh roughness.
         manning[m] = 0.015
         intensity[m] = 1.0
 
-    elif kind == "marsh_migration":
-        m = place_mask(kind)                             # migration band above MHW
-        # Roughness only. See the registry note: the wetland literature gives marsh no
+    elif kind in ("marsh_migration", "marsh_restoration"):
+        # Same edit, different ground. Migration roughens the band above MHW that becomes marsh
+        # as the tide advances; restoration roughens the existing platform between MLW and MHW.
+        # Roughness only for both. See the registry note: the wetland literature gives marsh no
         # infiltration pathway and the soil is saturated when the surge arrives.
+        m = place_mask(kind)
         manning[m] = np.maximum(manning[m], knobs["n_target"])
         intensity[m] = 1.0
 
@@ -627,7 +719,19 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
     elif kind == "living_shoreline":                     # marsh-water edge sill + roughness
         m = place_mask("living_shoreline")
         manning[m] = np.maximum(manning[m], knobs["n_target"])
-        dem[m] = dem[m] + knobs.get("sill_m", 0.2)
+        # Sill crest is set relative to the water level, following NOAA and Georgia guidance,
+        # not added to whatever the bed happened to be: an absolute rise left the sill far
+        # underwater at the higher SLR levels and those members became silent no-ops, the same
+        # fault already fixed for the floodwall crest.
+        #
+        # The crest applies only where building to it is a plausible structure. A sill is a low
+        # breakwater at the marsh toe, built where the water is shallow; the marsh-water edge also
+        # contains subtidal cells, and raising those to the water level would turn a 0.2 m sill
+        # into a 2 m embankment (the tidal range here is 2.2 m). Capping the rise at
+        # SILL_MAX_RISE_M selects the shallow toe rather than imposing a zone by hand.
+        crest = sea_level + knobs.get("sill_m", 0.2)
+        sill = m & (dem >= crest - SILL_MAX_RISE_M) & (dem < crest)
+        dem[sill] = crest
         intensity[m] = 1.0
 
     elif kind == "depave":                               # parking/impervious to vegetated
@@ -637,17 +741,19 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=0.81,
         ksat[m] = np.maximum(ksat[m], cap[m]); awc[m] = awc[m] + knobs["awc_add"]
         intensity[m] = 1.0
 
-    elif kind == "permeable":
-        m = place_mask("permeable")
-        cap = soil_capped(knobs["ksat_rate"])            # SSURGO-limited achievable rate
-        ksat[m] = np.maximum(ksat[m], cap[m])
-        intensity[m] = 1.0
-
     elif kind == "retreat":
         m = place_mask("retreat")
-        base = np.where(land & ~m, dem, np.nan)
-        med = np.nanmedian(base) if np.isfinite(base).any() else np.nanmedian(dem[land])
-        dem[m] = np.minimum(dem[m], med); manning[m] = knobs["natural_n"]
+        # Regrade each cleared cell to the LOCAL surrounding ground, not the domain median.
+        # Pin Point sits on a ridge, so the median across the whole clip lies well below the
+        # village: taking it excavated demolished footprints into a pit and invented storage the
+        # site never had, overstating retreat's benefit. A cleared lot returns to the level of
+        # the ground around it.
+        surround = np.where(land & ~m, dem, np.nan)
+        win = m_to_cells(knobs.get("regrade_window_m", 120.0), minimum=3)
+        local = _nanmean_filter(surround, win)
+        fallback = np.nanmedian(surround) if np.isfinite(surround).any() else np.nanmedian(dem[land])
+        target = np.where(np.isfinite(local), local, fallback)
+        dem[m] = np.minimum(dem[m], target[m]); manning[m] = knobs["natural_n"]
         cap = soil_capped(knobs["ksat_rate"])            # SSURGO-limited achievable rate
         ksat[m] = np.maximum(ksat[m], cap[m]); awc[m] = awc[m] + knobs["awc_add"]
         intensity[m] = 1.0
