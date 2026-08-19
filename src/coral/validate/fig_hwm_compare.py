@@ -106,6 +106,24 @@ def build(runs, dem, out, *, max_quality=None, max_dem_diff=None):
     if not scored:
         raise SystemExit("no run scored any marks; check the .mxe paths and the DEM extent")
 
+    # Score every run on the marks ALL of them wet. A run that leaves a mark dry drops it, so
+    # without this the runs are compared on different mark sets and their RMSEs are not
+    # comparable: in the tide-by-rain factorial the no-rain arm left 11 of 17 quality marks dry
+    # and was being scored on 7 while the rain arms were scored on 17.
+    if len(scored) > 1:
+        common = set.intersection(*({r["hwm_id"] for r in rows} for rows in scored.values()))
+        lost = {lab: len(rows) - len(common) for lab, rows in scored.items()}
+        if any(lost.values()):
+            print(f"\ncommon marks across all runs: {len(common)}")
+            for lab, k in lost.items():
+                if k:
+                    print(f"  {lab}: {k} mark(s) not scored here, dropped from every run")
+        scored = {lab: [r for r in rows if r["hwm_id"] in common]
+                  for lab, rows in scored.items()}
+        if not any(scored.values()):
+            raise SystemExit("no mark is wet in every run; compare fewer runs, or report "
+                             "each separately and say which marks each one reaches")
+
     hdr = f"{'run':22s} {'n':>3} {'bias':>7} {'RMSE':>6} {'slope':>6} {'r':>6} {'NSE':>7}"
     print("\n" + hdr)
     print("-" * len(hdr))
