@@ -119,10 +119,31 @@ def realisation_index(name):
     return int(m.group(1)) if m else None
 
 
+def is_combo(name):
+    """Members carrying more than one intervention. sweep names them slr<level>_combo<n>."""
+    return "_combo" in name
+
+
 def split(samples, holdout_slr=(), holdout_kind=(), holdout_frac=0.0, seed=0,
-          holdout_realisation=None):
+          holdout_realisation=None, holdout_combos=False):
     """Return (train, val) plus a description of how the split was made."""
     import numpy as np
+    if holdout_combos:
+        # Train on single interventions, test on members carrying two. This is the split
+        # that decides whether the emulator can be used to SEARCH adaptation space rather
+        # than only to look up configurations it has seen: a portfolio of two measures is
+        # a combination the training set never contains, and there are far more possible
+        # portfolios than could ever be simulated. If skill holds here, evaluating unseen
+        # combinations is supported; if it collapses, the emulator interpolates single
+        # edits and portfolio questions must go back to the parent model.
+        te = [s for s in samples if is_combo(s.name)]
+        tr = [s for s in samples if not is_combo(s.name)]
+        if not te:
+            raise SystemExit("no combination members found (expected names like "
+                             "slrInt2100_combo7). Check the manifest.")
+        how = (f"trained on {len(tr)} single-intervention members, held out {len(te)} "
+               "two-intervention members: unseen portfolios of known measures")
+        return tr, te, how
     if holdout_realisation is not None:
         # Withhold high realisation indices across every kind and sea level. This tests unseen
         # PLACEMENTS of known intervention types, which is what a user does in the tool: draw a
@@ -204,6 +225,8 @@ def main(argv=None):
     ap.add_argument("--subsample-per-kind", type=int, nargs="+", default=None,
                     help="train once per value, keeping that many realisations per kind, to "
                          "trace the learning curve against ensemble size")
+    ap.add_argument("--holdout-combos", action="store_true",
+                    help="train on single interventions, test on two-intervention members")
     ap.add_argument("--holdout-realisation", type=int, default=None,
                     help="withhold realisation indices >= N across all kinds and sea levels; "
                          "tests unseen placements of known intervention types")
@@ -254,7 +277,8 @@ def main(argv=None):
         tr, how = samples, f"validated on a separate ensemble: {', '.join(a.val_ensemble)}"
     else:
         tr, val, how = split(samples, a.holdout_slr, a.holdout_kind,
-                             a.holdout_frac, a.seed, a.holdout_realisation)
+                             a.holdout_frac, a.seed, a.holdout_realisation,
+                             a.holdout_combos)
 
     if a.limit:
         tr = tr[:a.limit]
