@@ -73,13 +73,17 @@ def check_noop(ens, manifest):
         if not run.exists():
             rows.append((e["name"], ks, "MISSING run dir"))
             continue
-        edited = [p.name for p in run.glob("*.asc") if not p.is_symlink()]
+        # Check the grid each kind is SUPPOSED to edit, not merely whether any file is real.
+        # "any real .asc" reported 100 percent for floodwall while every floodwall DEM was an
+        # unedited symlink, because sweep had written the wall into a differently-named grid.
         for k in ks:
             by_kind[k][1] += 1
-            if edited:
+            want = PRIMARY.get(k, "Manning")
+            hits = [q for q in run.glob(f"{want}_*.asc") if not q.is_symlink()]
+            if hits:
                 by_kind[k][0] += 1
-        if not edited:
-            rows.append((e["name"], ks, "no grid edited"))
+            else:
+                rows.append((e["name"], [k], f"{want} not edited"))
 
     n_iv = sum(1 for e in manifest if kinds_of(e))
     print(f"{n_iv:,} intervention members, {len(manifest) - n_iv} baselines\n")
