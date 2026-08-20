@@ -1,21 +1,22 @@
-# Final 4 m Pin Point decision ensemble. Supersedes pp4_tide_decision, which ran with marsh
-# infiltration that the wetland literature does not support, an unfiltered NWI mask, a migration
-# corridor that did not move with sea level, and seawall crests specified as absolute elevation.
-# See docs/ENSEMBLE_PROVENANCE.md for which ensemble used which physics.
+# Ensemble 01 on the corrected physics. The name is a key, not a description: every semantic
+# alternative collides on the second instance, and "final" collides immediately. The description
+# lives in the provenance table in docs/03-ensembles-and-emulator.md, which is where it can be
+# kept true.
 #
-# Six kinds. Mangrove is gone: Pin Point is 31.95 N and the poleward Georgia records sit near
-# 30.73 N, so it was a range-expansion hypothetical rather than an option. road_raise is new and
-# is the intervention the freeboard result argues for -- at a 0.45 m assumed first floor only 61
-# of 1548 structures take water, while the causeway is the only land access.
+# Parent    savannah_matthew_compound_tide -- extended 30 m domain [-81.22,-80.82,31.70,32.25],
+#           level-6 GeoClaw at run datum 0.0, explicit NOAA tide superposed in the .bdy with
+#           z_base = sea_level - 0.39, interior point sources plus open-ocean edge segments,
+#           uniform-level priming. Conserves at 1e-15.
+# Baseline  pp4_spinup -- reproduces the parent at bias +0.011 m, RMSE 0.070 m, r 0.9946,
+#           flooded-area ratio 1.035 on 612,271 cells. The 4 m clip holds no high-water marks,
+#           so that is a consistency check; the observational validation is the parent's, in
+#           reports/figures/hwm_tide_ab.png.
+# Window    [-24, 18]. Must start before the RAINFALL peak at t=133200, not before landfall:
+#           a [-6, 18] window loses 25 percent of the wet land footprint.
 #
-# include_combos is on. The single-kind ensembles answered the attribution question; the
-# optimiser combines options, so the emulator has to have seen combinations.
-#
-#   export CLEAN=$SCR/runs/pp4_tide_base
-#   python -m coral.emulator.sweep --base $CLEAN --out $SCR/runs/pp4_final \
-#       --config configs/scenarios/pp4_final.yaml --nlcd $DATA/nlcd_pinpoint.tif
-#   cd $SCR/runs/pp4_final && sbatch run_array.sbatch
-name: pp4_final
+# Supersedes pp4_tide_decision (1008 members) and pp4_wallsystems (128), both on the
+# pre-2026-08-17 physics, the old absolute floodwall crest, and the pre-widening roughness bands.
+name: pp4_e01
 domain:
   dem:   data/raw/coned_pinpoint_4m_floored.asc
   bbox:  [-81.1103, -81.0727, 31.9367, 31.9690]
