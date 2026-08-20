@@ -479,7 +479,11 @@ INTERVENTIONS = {
     # infiltration belongs to green roofs and permeable pavement. Marsh soil is saturated and
     # tidally flooded, so it has no capacity left to absorb a surge. The earlier ksat_add of
     # 10-40 mm/hr raised marsh benefit for a process that does not occur.
-    "marsh_migration": {"area_frac": (0.05, 0.30), "n_target": (0.03, 0.16),
+    # n_target is the roughness of the marsh that replaces the upland, written directly rather
+    # than maximised, so the low end now matters: it smooths forest instead of being ignored.
+    # 0.04 is the lower bound of Arefin's saltmarsh IQR and matches the p50 of 0.044 measured on
+    # the real marsh in this domain. Below that is bare flat, not marsh.
+    "marsh_migration": {"area_frac": (0.05, 0.30), "n_target": (0.04, 0.16),
                   "corr_len_m": (450, 1500)},
     # Restoration is a different intervention from migration and was previously conflated with
     # it: random siting placed on the existing NWI marsh (restoration) while targeted siting
@@ -503,7 +507,9 @@ INTERVENTIONS = {
     # 30.73 N, so it was never a plantable option here, only a range-expansion hypothetical. In
     # a decision ensemble it costs members and invites a question it cannot answer. The upper
     # end of the marsh n band already covers the roughness it contributed.
-    "living_shoreline": {"area_frac": (0.3, 0.7), "n_target": (0.04, 0.16),  # marsh-water edge
+    # Floored at 0.05, just above the p50 of 0.044 measured on the marsh band, so the planted
+    # marsh behind the sill is denser than the edge it replaces rather than equal to it.
+    "living_shoreline": {"area_frac": (0.3, 0.7), "n_target": (0.05, 0.16),  # marsh-water edge
                   "sill_m": (0.15, 0.40), "corr_len_m": (240, 750)},
     #            A sill with planted marsh behind it is a marsh surface, so the saltmarsh IQR
     #            applies. sill_m is UNSOURCED as an absolute rise: NOAA and Georgia guidance set
@@ -526,7 +532,11 @@ INTERVENTIONS = {
     # Chow (1959) floodplain classes: short-grass pasture 0.025-0.035, high grass 0.030-0.050,
     # scattered brush and heavy weeds 0.035-0.070. The previous 0.06-0.12 band sat above all of
     # them; only dense summer brush reaches it. Baseline asphalt is 0.013-0.016 for reference.
-    "depave":    {"area_frac": (0.10, 0.50), "n_target": (0.03, 0.10),   # parking/impervious
+    # n_target floors at 0.045 because the baseline gives developed land 0.04 and the edit is
+    # max(n, n_target): every draw below that left roughness untouched and moved infiltration
+    # only. 43 of 306 members were in that state, which compressed the bottom of the range onto
+    # a single effective roughness.
+    "depave":    {"area_frac": (0.10, 0.50), "n_target": (0.045, 0.10),  # parking/impervious
                   "ksat_rate": (20, 50), "awc_add": (30, 100), "corr_len_m": (240, 750)},  # to vegetated
     # Raising the causeway. At Pin Point the access road floods well before the houses do -- at
     # a 0.45 m assumed first floor only 61 of 1548 structures take water on the Matthew run --
@@ -689,13 +699,27 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=None,
         manning[m] = 0.015
         intensity[m] = 1.0
 
-    elif kind in ("marsh_migration", "marsh_restoration"):
-        # Same edit, different ground. Migration roughens the band above MHW that becomes marsh
-        # as the tide advances; restoration roughens the existing platform between MLW and MHW.
-        # Roughness only for both. See the registry note: the wetland literature gives marsh no
-        # infiltration pathway and the soil is saturated when the surge arrives.
-        m = place_mask(kind)
+    elif kind == "marsh_restoration":
+        # Restoration adds vegetation to ground that is already marsh, so the target can only
+        # raise roughness. max() also stops a low draw from smoothing healthy marsh. Measured on
+        # the 4 m baseline, the [MLW, MHW] band runs p50 0.044, p90 0.075, so the registry's 0.06
+        # floor bites on most of it.
+        m = place_mask("marsh_restoration")
         manning[m] = np.maximum(manning[m], knobs["n_target"])
+        intensity[m] = 1.0
+
+    elif kind == "marsh_migration":
+        # Assignment, not max(). Migration is a land-cover conversion: upland becomes marsh, and
+        # the upland here is rougher than the marsh replacing it. Measured on the 4 m baseline
+        # the corridor above MHW runs p50 0.086 and p75 0.32, which is forest and scrub, against
+        # 0.044 to 0.086 for real marsh. max(0.32, n_target) with n_target capped at 0.16 cannot
+        # move three quarters of the corridor, so members edited only the cells that happened to
+        # be smoother than their draw and one member reached zero such cells.
+        #
+        # Converting forest to marsh LOWERS roughness. Writing the target directly is what the
+        # conversion means, and it is why this kind is separated from restoration above.
+        m = place_mask("marsh_migration")
+        manning[m] = knobs["n_target"]
         intensity[m] = 1.0
 
     elif kind == "road_raise":
