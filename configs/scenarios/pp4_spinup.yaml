@@ -19,7 +19,7 @@ lisflood:
   # at -6 h began the run near the surge peak with a very wet primed state and no time for the
   # solver to settle: the domain reached 9.5 m mean depth with a collapsing timestep. -24 h gives
   # 18 h of spin-up from a quiescent parent, and still covers [-6, 18] for reporting.
-  sim_window_h: [-24, 18]
+  sim_window_h: [-24, 24]
   # Edge boundary conditions are inert on a dry start (sgc.cpp:1354). Primed from the 30 m parent
   # by couple.make_startfile, which must be given the same --root and --results as nest_bdy.
   startfile: start_pp4_spinup.asc

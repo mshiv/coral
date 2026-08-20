@@ -12,10 +12,10 @@ coupling:
   landfall_utc: "2016-10-08T13:00:00"
   landfall_s: 172800
 lisflood:
-  # MUST match pp4_e01. The baseline supplies flood_depth for targeted siting and is what
-  # every member is differenced against, so a different window makes the two incomparable. That
-  # is the wall-systems failure: [-6, 12] here against [-6, 18] there.
-  sim_window_h: [-6, 18]
+  # SUPERSEDED as the baseline by pp4_spinup, which is what pp4_e01 sites against. Kept because
+  # older runs reference it. The window matches pp4_spinup so the two are comparable: it must
+  # start before the rainfall peak at t=133200, and run to +24 h so recession is measurable.
+  sim_window_h: [-24, 24]
   # Edge boundary conditions are inert on a dry start (sgc.cpp:1354). Primed from the 30 m parent
   # by couple.make_startfile, which must be given the same --root and --results as nest_bdy.
   startfile: start_pinpoint_highres_4m.asc

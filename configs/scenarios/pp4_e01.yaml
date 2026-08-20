@@ -11,8 +11,10 @@
 #           flooded-area ratio 1.035 on 612,271 cells. The 4 m clip holds no high-water marks,
 #           so that is a consistency check; the observational validation is the parent's, in
 #           reports/figures/hwm_tide_ab.png.
-# Window    [-24, 18]. Must start before the RAINFALL peak at t=133200, not before landfall:
-#           a [-6, 18] window loses 25 percent of the wet land footprint.
+# Window    [-24, 24]. The start must precede the RAINFALL peak at t=133200, not landfall: a
+#           [-6, 18] window loses 25 percent of the wet land footprint, since rain sets extent.
+#           The end runs to +24 h so recession is measurable and comparable with the 30 m runs,
+#           which is where the tide's contribution shows: it governs drainage, not peak stage.
 #
 # Supersedes pp4_tide_decision (1008 members) and pp4_wallsystems (128), both on the
 # pre-2026-08-17 physics, the old absolute floodwall crest, and the pre-widening roughness bands.
@@ -28,7 +30,7 @@ coupling:
 lisflood:
   # Must match the baseline. [-6, 18] starts five hours after the rainfall peak at t=133200
   # and loses 25 percent of the wet footprint, since rain is what sets extent.
-  sim_window_h: [-24, 18]           # same window as pp4_tide_decision, so the two compare
+  sim_window_h: [-24, 24]           # same window as pp4_tide_decision, so the two compare
   # Members use the same edge boundary as the baseline, and edges are inert on a dry start
   # (sgc.cpp:1354). sweep must stage this into every member dir alongside the grids.
   startfile: start_pinpoint_highres_4m.asc
