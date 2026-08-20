@@ -22,7 +22,14 @@ def _norm(a):
     """Scale finite values to [0,1]; non-finite -> 0."""
     a = np.where(np.isfinite(a), a, np.nan)
     lo, hi = np.nanmin(a), np.nanmax(a)
-    if not np.isfinite(lo) or hi <= lo:
+    # A relative tolerance, not hi <= lo. Once the water level passes MHW the whole restoration
+    # band is sea, so uniform_filter returns a near-constant exposure and hi - lo is float64
+    # rounding residue. Dividing by it stretched that residue across [0,1], and because the
+    # filter accumulates along rows first the residue carries row structure, which rank selection
+    # then followed: horizontal banding in the coverage figure, 8.5x row-to-column anisotropy at
+    # High2050 against 1.85 at slr0.0. A driver this flat carries no information, so return a
+    # constant and let the seeded tiebreak place the cells.
+    if not np.isfinite(lo) or (hi - lo) <= 1e-12 * max(1.0, abs(hi), abs(lo)):
         return np.nan_to_num(a * 0.0)
     return np.nan_to_num((a - lo) / (hi - lo))
 
