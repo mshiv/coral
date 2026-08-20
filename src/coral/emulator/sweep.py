@@ -216,7 +216,10 @@ def _check_par(base):
 
 
 def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
-                bdy_glob="*.bdy", sea_level=0.81, mhw=1.114, mlw=-1.091,
+                # 0.81 as a default sea level is the superseded value with no derivation on
+                # record. The CLI passes cfg.datums, so leave these unset and let the call fail
+                # rather than let a direct call inherit it silently.
+                bdy_glob="*.bdy", sea_level=None, mhw=None, mlw=None,
                 focus_center=None, focus_radius_km=None, focus_mask=None, nlcd=None,
                 wetlands=None, soil_ksat=None, buildings=None, roads=None,
                 place="random", flood_depth=None, flood_zone=None, res_m=30.0,

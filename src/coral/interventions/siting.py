@@ -63,7 +63,14 @@ def suitability_score(dem, kind, *, sea_level=None, wetlands=None, buildings=Non
         # slr_buffer must be the member's own rise, not a constant. Migration space is defined
         # by how far the tide advances, so a fixed 0.5 m gave a Low2050 member and a High2100
         # member the same corridor.
-        band = land & (dem >= mhw) & (dem <= mhw + slr_buffer)
+        #
+        # No `land` gate. The corridor runs from present MHW to future MHW, so cells inside it
+        # are meant to sit below the member's raised water level; that is what makes them
+        # migration space. Gating on dem > sea_level put the floor at the raised waterline while
+        # the ceiling stayed at mhw + rise, which is the same elevation, and the band closed to a
+        # few millimetres. Every targeted member above slr0.0 sited nothing. suitability_mask,
+        # which the random path uses, never had the gate, so only targeted members were affected.
+        band = np.isfinite(dem) & (dem >= mhw) & (dem <= mhw + slr_buffer)
         if classes is not None:
             band = band & ~np.isin(classes, NLCD_DEV)
         if buildings is not None:
