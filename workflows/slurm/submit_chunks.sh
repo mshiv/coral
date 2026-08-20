@@ -114,7 +114,10 @@ log() { echo "[$(date '+%m-%d %H:%M:%S')] $*"; }
 
 valid_max() {
   local f
-  f=$(find "$1"/results_*/ -maxdepth 1 -name '*.max' 2>/dev/null | head -1)
+  # `|| true`: head closes the pipe, find dies on SIGPIPE with 141, pipefail propagates it and
+  # set -e exits with an EMPTY stderr. This pattern killed a GeoClaw job eight seconds in with
+  # no error message anywhere. An empty result is a normal outcome here, not a failure.
+  f=$(find "$1"/results_*/ -maxdepth 1 -name '*.max' 2>/dev/null | head -1 || true)
   [ -n "$f" ] || return 1
   awk 'NR<=6{k=tolower($1); v=$2; if(k=="ncols")c=v; if(k=="nrows")r=v}
        NR==7{exit} END{if(c>0&&r>0) print int(3*c*r); else print -1}' "$f" 2>/dev/null \
@@ -136,11 +139,11 @@ if [ -z "$QOS" ]; then
 fi
 if [ -z "$QOS" ]; then                       # the association's DEFAULT QOS is what a job gets
   QOS=$(sacctmgr -n show assoc where user="$USER" format=DefaultQOS%30 2>/dev/null \
-        | tr -d ' ' | grep -v '^$' | head -1)
+        | tr -d ' ' | grep -v '^$' | head -1 || true)
 fi
 if [ -z "$QOS" ]; then
   QOS=$(sacctmgr -n show assoc where user="$USER" format=QOS%60 2>/dev/null \
-        | tr -d ' ' | grep -v '^$' | head -1 | cut -d, -f1)
+        | tr -d ' ' | grep -v '^$' | head -1 | cut -d, -f1 || true)
   log "no default QOS found; falling back to $QOS. Pass --qos if the limits below look wrong."
 fi
 MAXSUB=$(sacctmgr -n show qos "$QOS" format=MaxSubmitJobsPU 2>/dev/null | tr -d ' ')
