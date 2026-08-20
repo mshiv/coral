@@ -365,7 +365,18 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
     # pick the .par deterministically: prefer an ASCII-output one. A base dir often holds
     # several (savannah.par, test.par) that enable netcdf_out, which segfaults on
     # finalisation in this build, and Path.glob order is not guaranteed.
+    # A base directory that accumulated pars from debugging is the normal case, not the
+    # exception, and picking the first one alphabetically is how every member of an ensemble
+    # came to reference `control_aug5.par` -- an Aug 5 debugging configuration with the wrong
+    # boundary, startfile and start time. Sorting is deterministic, which makes it reproducibly
+    # wrong rather than obviously wrong. Refuse instead, and say which files to move.
     pars = sorted(p for p in passthrough if p.suffix == ".par")
+    if len(pars) > 1:
+        raise SystemExit(
+            f"{base} holds {len(pars)} .par files, so which one every member runs would be "
+            f"decided by sort order:\n  " + "\n  ".join(p.name for p in pars) +
+            "\n\nLeave exactly one, the par the baseline actually ran, and move the rest "
+            "aside (a pars_archive/ subdirectory works; sweep only globs the top level).")
     ascii_pars = [p for p in pars
                   if not any(l.strip().startswith("netcdf_out") for l in p.read_text().splitlines())]
     if not pars:
