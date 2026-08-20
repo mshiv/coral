@@ -643,7 +643,10 @@ def apply_intervention(knobs, dem, manning, ksat, awc, *, sea_level=None,
         at any grid resolution."""
         if place == "targeted":
             from .siting import targeted_mask
-            return targeted_mask(dem, k, knobs.get("area_frac", 0.1), sea_level=sea_level,
+            # seed reaches the tiebreak, so members with a flat driver still differ from
+            # each other instead of all selecting the same cells.
+            return targeted_mask(dem, k, knobs.get("area_frac", 0.1),
+                                 seed=int(knobs.get("seed", 0)), sea_level=sea_level,
                                  wetlands=wetlands, buildings=buildings, roads=roads,
                                  flood_depth=flood_depth,
                                  flood_zone=flood_zone, classes=classes, soil_ksat=soil_ksat,

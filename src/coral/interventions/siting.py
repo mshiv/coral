@@ -156,16 +156,34 @@ def intertidal_mask(dem, *, mlw=None, mhw=None, slr_buffer=0.5, nlcd=None, nwi=N
     return band if veg is None else (band & veg)
 
 
-def targeted_mask(dem, kind, area_frac, *, close_iter=1, **drivers):
+def targeted_mask(dem, kind, area_frac, *, close_iter=1, seed=0, **drivers):
     """Boolean placement mask: the top `area_frac` of suitability_score, smoothed for
-    contiguity. Drop-in alternative to generate.patch_mask for realistic scenarios."""
+    contiguity. Drop-in alternative to generate.patch_mask for realistic scenarios.
+
+    Selection takes the highest-scoring cells by rank, with a seeded tiebreak. A quantile
+    threshold does not work here because several scores are flat over most of their zone: the
+    de-pave driver comes from baseline peak depth, and the impervious footprint is mostly dry,
+    so the score sits at its constant floor. Every cell then ties, the threshold lands on that
+    constant, and `s >= thr` returns the whole zone whatever area_frac says. Measured across 86
+    targeted members, footprint against area_frac gave Spearman +0.007: the knob controlled
+    nothing. Ties also made the selection follow score level-sets, which is the horizontal
+    banding visible in the coverage figure.
+
+    Closing runs after selection and can add a few percent to the count, so the footprint is
+    close to `area_frac` of the zone rather than exactly it.
+    """
     from scipy import ndimage
     s = suitability_score(dem, kind, **drivers)
-    pos = s[s > 0]
+    flat = s.ravel()
+    pos = np.flatnonzero(flat > 0)
     if pos.size == 0:
         return np.zeros(dem.shape, bool)
-    thr = np.quantile(pos, max(0.0, 1.0 - area_frac))
-    m = s >= max(thr, np.nextafter(0, 1))
+    n = int(min(pos.size, max(1, round(float(area_frac) * pos.size))))
+    rng = np.random.default_rng(seed)
+    order = np.lexsort((rng.random(pos.size), -flat[pos]))   # score first, random breaks ties
+    m = np.zeros(flat.size, bool)
+    m[pos[order[:n]]] = True
+    m = m.reshape(s.shape)
     if close_iter:
         m = ndimage.binary_closing(m, iterations=int(close_iter))
     return m & (s > 0)
