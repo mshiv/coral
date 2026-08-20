@@ -25,7 +25,9 @@ coupling:
   landfall_utc: "2016-10-08T13:00:00"
   landfall_s: 172800
 lisflood:
-  sim_window_h: [-6, 18]           # same window as pp4_tide_decision, so the two compare
+  # Must match the baseline. [-6, 18] starts five hours after the rainfall peak at t=133200
+  # and loses 25 percent of the wet footprint, since rain is what sets extent.
+  sim_window_h: [-24, 18]           # same window as pp4_tide_decision, so the two compare
   # Members use the same edge boundary as the baseline, and edges are inert on a dry start
   # (sgc.cpp:1354). sweep must stage this into every member dir alongside the grids.
   startfile: start_pinpoint_highres_4m.asc
@@ -65,7 +67,7 @@ interventions:
   # the hold-out that matters: train on random, test on targeted.
   siting: mixed
   targeted_frac: 0.3
-  flood_depth: ${CLEAN}/res_pinpoint_highres_4m.max
+  flood_depth: ${CLEAN}/results_pp4_spinup/res_pp4_spinup.max
   wetlands:      data/raw/sagis_pinpoint/sagis_wetlands_nwi.geojson
   soils_geojson: data/raw/sagis_pinpoint/sagis_soils_nrcs.geojson
   ssurgo_table:  data/raw/ssurgo_pinpoint/ksat_awc_by_mukey.json
