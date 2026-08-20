@@ -33,9 +33,13 @@ from .physics_ab import _read_grid
 from ..viz.pinpoint_style import PALETTE
 
 # which grid each kind is expected to edit first
-PRIMARY = {"floodwall": "SUB_DEM", "road_raise": "SUB_DEM", "retreat": "SUB_DEM",
-           "living_shoreline": "SUB_DEM", "marsh_restoration": "Manning",
-           "marsh_migration": "Manning", "depave": "Manning"}
+# The grids a kind is allowed to edit. A kind passes if ANY of them is real, because a kind
+# with two levers can move one and leave the other alone: de-pave draws n_target from a range
+# whose lower part sits below the baseline roughness of developed land (0.04), so those members
+# edit infiltration only. Testing Manning alone called 43 valid members no-ops.
+PRIMARY = {"floodwall": ("SUB_DEM",), "road_raise": ("SUB_DEM",), "retreat": ("SUB_DEM",),
+           "living_shoreline": ("SUB_DEM", "Manning"), "marsh_restoration": ("Manning",),
+           "marsh_migration": ("Manning",), "depave": ("Manning", "infil", "infilcap")}
 ELEV_KINDS = ("floodwall", "road_raise", "living_shoreline", "retreat")
 
 
@@ -78,12 +82,13 @@ def check_noop(ens, manifest):
         # unedited symlink, because sweep had written the wall into a differently-named grid.
         for k in ks:
             by_kind[k][1] += 1
-            want = PRIMARY.get(k, "Manning")
-            hits = [q for q in run.glob(f"{want}_*.asc") if not q.is_symlink()]
-            if hits:
+            want = PRIMARY.get(k, ("Manning",))
+            hit = [f for f in want
+                   if any(not q.is_symlink() for q in run.glob(f"{f}_*.asc"))]
+            if hit:
                 by_kind[k][0] += 1
             else:
-                rows.append((e["name"], [k], f"{want} not edited"))
+                rows.append((e["name"], [k], f"none of {'/'.join(want)} edited"))
 
     n_iv = sum(1 for e in manifest if kinds_of(e))
     print(f"{n_iv:,} intervention members, {len(manifest) - n_iv} baselines\n")
@@ -140,7 +145,7 @@ def panels(ens, manifest, base, out, seed=0):
     fig, ax = plt.subplots(len(kinds), 3, figsize=(13, 3.5*len(kinds)), squeeze=False)
     for i, k in enumerate(kinds):
         e = pick(manifest, k, seed=seed)
-        field = PRIMARY.get(k, "Manning")
+        field = PRIMARY.get(k, ("Manning",))[0]          # figures show the leading lever
         za, zb, d = _diff(e["run_dir"], base, field)
         if d is None or not np.isfinite(d).any():
             for j in range(3):
@@ -186,7 +191,7 @@ def coverage(ens, manifest, base, out, per_kind=25, seed=0):
     fig, ax = plt.subplots(2, len(kinds), figsize=(3.1*len(kinds), 7), squeeze=False)
     rng = random.Random(seed)
     for j, k in enumerate(kinds):
-        field = PRIMARY.get(k, "Manning")
+        field = PRIMARY.get(k, ("Manning",))[0]          # figures show the leading lever
         for i, mode in enumerate(["random", "targeted"]):
             cand = [e for e in manifest if k in kinds_of(e) and e.get("siting") == mode]
             rng.shuffle(cand)
