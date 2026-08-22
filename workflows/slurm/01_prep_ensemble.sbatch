@@ -57,7 +57,18 @@ fi
 log "scratch free before: $(df -h "$SCR" | awk 'NR==2{print $4}')"
 
 # A stale ensemble from an older sweep would mix relative run_dirs and the wrong .par.
+# Refuse to delete an ensemble that has been RUN. This script rebuilds inputs from scratch,
+# and a stale ensemble really does have to go first -- but "prep" reads as harmless, and the
+# rm -rf below removed completed results as readily as stale inputs. Regenerating inputs is
+# minutes; regenerating 1928 members of output is a day of compute.
 if [ -d "$OUT" ]; then
+  NRES=$(ls -d "$OUT"/*/results_* 2>/dev/null | wc -l)
+  if [ "$NRES" -gt 0 ] && [ "${FORCE:-0}" != "1" ]; then
+    bad "$OUT holds $NRES completed result directories."
+    bad "This script deletes and regenerates the whole ensemble, which would discard them."
+    bad "Move the results aside first, or re-run with FORCE=1 if you truly mean to erase them."
+    exit 1
+  fi
   log "removing existing $OUT so the sweep is regenerated cleanly"
   rm -rf "$OUT"
 fi
