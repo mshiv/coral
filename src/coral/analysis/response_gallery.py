@@ -10,6 +10,17 @@ that lowers water in one place can raise it in another, and a wall that protects
 footprint while pushing water onto a neighbour is a real modelled outcome, not an artefact.
 The reported `max_increase_m` and `area_worsened_m2` are the numbers that expose it.
 
+The footprint is drawn on the CHANGE panel, not on the depth panels. Where the edit sits is
+only interpretable against where the water moved: a wall outline over a depth map says little,
+while the same outline against blue upstream and red downstream shows the mechanism. Linear
+measures are drawn as an outline so the change beneath stays visible; area measures are drawn
+as a hatched boundary for the same reason. The footprint is recovered by differencing the
+member grids against the baseline, so it is what the model actually received rather than what
+the manifest requested.
+
+Terrain sits underneath as a hillshade with open water flooded in, so a reader can tell a
+channel from a road without a separate reference figure.
+
 Members are matched to the no-intervention baseline AT THE SAME SEA LEVEL, so the sea-level
 signal cancels and what remains is the intervention.
 
@@ -27,7 +38,8 @@ from pathlib import Path
 import numpy as np
 
 NODATA = -9999.0
-PALETTE = {"cut": "#2c7fb8", "add": "#a63f22"}
+PALETTE = {"cut": "#2c7fb8", "add": "#a63f22",
+           "water": "#9CC3D5", "edit": "#C0392B"}
 
 
 def read_asc(path):
@@ -45,6 +57,33 @@ def read_asc(path):
 def find_max(run_dir):
     hits = sorted(Path(run_dir).glob("results_*/*.max"))
     return hits[0] if hits else None
+
+
+# Which grid carries each kind's footprint, and how to draw it. Linear structures read as
+# outlines; area treatments read as a boundary with light fill.
+FOOTPRINT = {
+    "floodwall":         ("SUB_DEM", "line"),
+    "road_raise":        ("SUB_DEM", "line"),
+    "retreat":           ("SUB_DEM", "area"),
+    "living_shoreline":  ("SUB_DEM", "area"),
+    "marsh_restoration": ("Manning", "area"),
+    "marsh_migration":   ("Manning", "area"),
+    "depave":            ("Manning", "area"),
+}
+
+
+def footprint(run_dir, base_dir, field, tol=1e-6):
+    """Cells the member actually changed, from the grids rather than the manifest."""
+    a = sorted(Path(run_dir).glob(f"{field}_*.asc"))
+    b = sorted(Path(base_dir).glob(f"{field}_*.asc"))
+    if not a or not b:
+        return None
+    m = read_asc(a[0])[0]
+    n = read_asc(b[0])[0]
+    if m.shape != n.shape:
+        return None
+    d = np.abs(np.nan_to_num(m, nan=0.0) - np.nan_to_num(n, nan=0.0))
+    return d > tol
 
 
 def kinds_of(entry):
@@ -97,12 +136,18 @@ def main():
                     help="pin one sea level, e.g. slr0.0 or slrInt2050. Without it the\nlargest footprint wins, which biases selection toward the highest offset.")
     ap.add_argument("--exclude", nargs="*", default=(),
                     help="member names to skip, e.g. any that failed mass verification")
+    ap.add_argument("--base", default=None,
+                    help="baseline input dir (pp4_base). Needed to recover footprints.")
+    ap.add_argument("--no-basemap", action="store_true",
+                    help="drop the terrain hillshade")
     a = ap.parse_args()
 
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+    from coral.viz.pinpoint_style import make_flood_cmap
+    FLOOD = make_flood_cmap()
 
     manifest = json.load(open(Path(a.ens) / "manifest.json"))
     chosen = pick(manifest, a.slr, a.exclude)
@@ -126,8 +171,12 @@ def main():
         d = np.where(land, dm - db, np.nan)
         wet = land & ((dm > a.threshold) | (db > a.threshold))
         cell = a.cell_m ** 2
+        fp = None
+        if a.base and k in FOOTPRINT:
+            fp = footprint(mem["run_dir"], a.base, FOOTPRINT[k][0])
         stats[k] = {
             "member": mem["name"], "baseline": base["name"],
+            "footprint_cells": int(fp.sum()) if fp is not None else None,
             "mean_change_m": float(np.nanmean(d[wet])) if wet.any() else 0.0,
             "max_reduction_m": float(-np.nanmin(d[wet])) if wet.any() else 0.0,
             "max_increase_m": float(np.nanmax(d[wet])) if wet.any() else 0.0,
@@ -136,33 +185,64 @@ def main():
             "wet_area_change_m2": float((land & (dm > a.threshold)).sum()
                                         - (land & (db > a.threshold)).sum()) * cell,
         }
-        rows.append((k, np.where(land, db, np.nan), np.where(land, dm, np.nan), d, mem["name"]))
+        rows.append((k, np.where(land, db, np.nan), np.where(land, dm, np.nan), d,
+                     mem["name"], fp))
 
     cmap_d = LinearSegmentedColormap.from_list(
         "cut_add", [PALETTE["cut"], "#ffffff", PALETTE["add"]])
-    fig, ax = plt.subplots(len(rows), 3, figsize=(13, 3.5 * len(rows)), squeeze=False)
-    for i, (k, db, dm, d, nm) in enumerate(rows):
-        vmax = np.nanpercentile(np.concatenate([db[np.isfinite(db)], dm[np.isfinite(dm)]]), 99)
+    shade = None
+    if not a.no_basemap:
+        from coral.viz.pinpoint_style import hillshade
+        shade = hillshade(np.nan_to_num(dem, nan=float(np.nanmin(dem[np.isfinite(dem)]))))
+    sea = np.isfinite(dem) & (dem <= a.waterline)
+
+    def ground(ax):
+        """Terrain under every panel, so a channel is distinguishable from a road."""
+        if shade is not None:
+            ax.imshow(shade, cmap="Greys_r", vmin=0, vmax=1.4, interpolation="none", zorder=0)
+        ax.imshow(np.where(sea, 1.0, np.nan), cmap=ListedColormap([PALETTE["water"]]),
+                  vmin=0, vmax=1, interpolation="none", zorder=1, alpha=0.9)
+
+    def draw_footprint(ax, fp, style):
+        """Outline, never a solid fill: the change beneath has to stay readable."""
+        if fp is None or not fp.any():
+            return
+        ax.contour(fp.astype(float), levels=[0.5], colors=[PALETTE["edit"]],
+                   linewidths=1.1 if style == "line" else 0.8, zorder=5)
+        if style == "area":
+            ax.imshow(np.where(fp, 1.0, np.nan),
+                      cmap=ListedColormap([PALETTE["edit"]]), vmin=0, vmax=1,
+                      alpha=0.13, interpolation="none", zorder=4)
+
+    fig, ax = plt.subplots(len(rows), 3, figsize=(13.5, 3.6 * len(rows)), squeeze=False)
+    for i, (k, db, dm, d, nm, fp) in enumerate(rows):
+        finite = np.concatenate([db[np.isfinite(db)], dm[np.isfinite(dm)]])
+        vmax = np.nanpercentile(finite, 99) if finite.size else 0.1
         for j, (arr, ttl) in enumerate(((db, "no intervention"), (dm, "with intervention"))):
-            im = ax[i][j].imshow(arr, cmap="Blues", vmin=0, vmax=max(vmax, 0.1),
-                                 interpolation="none")
+            ground(ax[i][j])
+            im = ax[i][j].imshow(np.where(arr > a.threshold, arr, np.nan), cmap=FLOOD,
+                                 vmin=0, vmax=max(vmax, 0.1), interpolation="none", zorder=2)
             ax[i][j].set_title(f"{k}: {ttl}" if j == 0 else ttl, fontsize=10)
             fig.colorbar(im, ax=ax[i][j], fraction=0.046, label="depth (m)")
+        ground(ax[i][2])
         v = np.nanpercentile(np.abs(d), 99.5) or 0.05
-        im = ax[i][2].imshow(d, cmap=cmap_d, vmin=-v, vmax=v, interpolation="none")
-        ax[i][2].set_title("change", fontsize=10)
+        im = ax[i][2].imshow(np.where(np.abs(d) > 0.005, d, np.nan), cmap=cmap_d,
+                             vmin=-v, vmax=v, interpolation="none", zorder=2)
+        draw_footprint(ax[i][2], fp, FOOTPRINT.get(k, (None, "area"))[1])
+        ax[i][2].set_title("change, with the edit outlined", fontsize=10)
         fig.colorbar(im, ax=ax[i][2], fraction=0.046, label="m")
         s = stats[k]
+        fpn = f", {s['footprint_cells']:,} cells edited" if s.get("footprint_cells") else ""
         ax[i][2].set_xlabel(
             f"{nm}\n-{s['max_reduction_m']:.2f} m deepest cut, "
             f"+{s['max_increase_m']:.2f} m worst increase, "
-            f"{s['area_worsened_m2']/1e4:.1f} ha worsened", fontsize=8, color="0.35")
+            f"{s['area_worsened_m2']/1e4:.1f} ha worsened{fpn}", fontsize=8, color="0.35")
         for j in range(3):
             ax[i][j].set_xticks([]); ax[i][j].set_yticks([])
 
     fig.suptitle("Flood response to each intervention, against the baseline at the same sea level",
                  fontsize=13)
-    fig.text(0.5, 0.005, "Blue: depth reduced.  Red: depth increased -- water moved, not removed.",
+    fig.text(0.5, 0.005, "Blue: depth reduced.  Red: depth increased -- water moved, not removed.  Dark red outline: the cells the member actually edited.",
              ha="center", fontsize=9, color="0.4")
     fig.tight_layout(rect=[0, 0.012, 1, 0.985])
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
