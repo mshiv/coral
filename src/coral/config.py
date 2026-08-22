@@ -106,6 +106,12 @@ class Coupling:
     # so the offset is added rather than removed. Passing sea_level alone as the baseline, as
     # the code did, leaves the boundary 0.39 m low.
     mean_offset_m: float = 0.39
+    # Multiplies the GeoClaw surge residual in the boundary; the tide is unaffected. 0.0 gives
+    # a tide-only boundary, which is what the inland and baseline arms of the compound ladder
+    # need. Without a surge-free run only the nonlinear residual N is computable, not the
+    # compound effect C = full - max(coastal, inland), and N alone understates the case for a
+    # coupled model here.
+    surge_scale: float = 1.0
     dry_thresh: float = 0.05
     landfall_s: float = 172800.0      # model-clock time of landfall (bdy/par origin)
     landfall_utc: Optional[str] = None  # calendar anchor for model t=0 (ISO8601),

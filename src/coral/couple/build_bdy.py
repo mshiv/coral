@@ -72,7 +72,7 @@ def _read_gauge(path):
 def build_bdy(output_dir, bci_in, bdy_out, bci_out, *,
               n_coupling=None, dry_thresh=0.05, datum_offset=0.0,
               time_offset=None, landfall_s=None,
-              tide=None, surge_baseline=0.0):
+              tide=None, surge_baseline=0.0, surge_scale=1.0):
     """Write <bdy_out> and a filtered <bci_out>. Returns a summary dict.
 
     n_coupling=None (default) takes the coupling gauge ids from the .bci P-lines
@@ -140,7 +140,12 @@ def build_bdy(output_dir, bci_in, bdy_out, bci_out, *,
             vout = eta
             if tide is not None:
                 tide_t, tide_v = tide                      # both on the model clock
-                vout = eta - surge_baseline + np.interp(tw, tide_t, tide_v)
+                # surge_scale multiplies the GeoClaw residual only. 0.0 leaves tide alone,
+                # which is the inland and baseline arms of the compound ladder: without a
+                # surge-free run the compound EFFECT C = full - max(coastal, inland) cannot
+                # be computed, only the nonlinear residual, and the residual understates the
+                # case for coupling at this site.
+                vout = surge_scale * (eta - surge_baseline) + np.interp(tw, tide_t, tide_v)
             f.write(f"bc{i}\n{len(t)}\t\tseconds\n")
             for v, tt in zip(vout, tw):
                 f.write(f"{v:.7g}\t{tt:.5f}\t\n")
@@ -211,7 +216,8 @@ def from_config(cfg, output_dir, bci_in, bdy_out, bci_out, n_coupling=None,
                      dry_thresh=cfg.coupling.dry_thresh,
                      datum_offset=cfg.coupling.datum_offset_m,
                      landfall_s=cfg.coupling.landfall_s,
-                     tide=tide, surge_baseline=surge_baseline or 0.0)
+                     tide=tide, surge_baseline=surge_baseline or 0.0,
+                     surge_scale=float(getattr(cfg.coupling, 'surge_scale', 1.0)))
 
 
 # ---------------------------------------------------------------- window extension

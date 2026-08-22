@@ -1,0 +1,39 @@
+# The rain-only arm of the compound attribution ladder.
+#
+# Rainfall and tide, with the storm surge removed from the coastal boundary. Together with
+# savannah_matthew_tide_norain (surge and tide, no rain) and savannah_matthew_compound_tide
+# (everything), this is what makes the compound EFFECT computable rather than only the
+# nonlinear residual:
+#
+#   C = Y_full - max(Y_coastal, Y_inland)
+#   N = Y_full - Y_coastal - Y_inland + Y_baseline
+#
+# C is how much the coupled run exceeds the better of the two single-driver runs, which is
+# what a workflow that overlays separate hazard maps would produce. N is departure from
+# linear superposition. The mean N at this site is +0.005 m, and reporting that alone
+# understates the case for coupling; C is the quantity a planner is exposed to.
+#
+# Tide is retained rather than removed, because a rain-only run with no coastal water level
+# would drain to an empty estuary and answer a question nobody asks. The inland arm is
+# "what would this rainfall do on an ordinary tide", which is the honest counterfactual.
+name: savannah_matthew_rain_only
+domain:
+  dem:   data/raw/ga_cudem_30m.tif
+  bbox:  [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  refine_box: [-81.150, -80.800, 31.680, 32.244]
+lisflood:
+  startfile: start_savannah_matthew_rain_only.asc
+coupling:
+  landfall_utc: "2016-10-08T13:00:00"
+  surge_scale: 0.0        # tide-only boundary; the GeoClaw residual is dropped
+forcing:
+  tide: noaa
+  tide_station: "8670870"
+  rainfall: aorc            # the driver this arm isolates
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
+  mask_saturated_wetland: false
