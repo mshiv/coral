@@ -39,7 +39,10 @@ import numpy as np
 
 NODATA = -9999.0
 PALETTE = {"cut": "#2c7fb8", "add": "#a63f22",
-           "water": "#9CC3D5", "edit": "#C0392B"}
+           "water": "#9CC3D5",
+           # The edit is annotation, not data, so it must not sit on the diverging ramp.
+           # A red outline over a blue-white-red change map reads as "depth increased".
+           "edit": "#111111"}
 
 
 def read_asc(path):
@@ -140,6 +143,8 @@ def main():
                     help="baseline input dir (pp4_base). Needed to recover footprints.")
     ap.add_argument("--no-basemap", action="store_true",
                     help="drop the terrain hillshade")
+    ap.add_argument("--mlw", type=float, default=-1.091,
+                    help="water fill uses MLW, not the waterline: at Pin Point the marsh\nplatform sits below MHW, so filling to MHW floods most of the frame and buries the terrain.")
     a = ap.parse_args()
 
     import matplotlib
@@ -194,7 +199,8 @@ def main():
     if not a.no_basemap:
         from coral.viz.pinpoint_style import hillshade
         shade = hillshade(np.nan_to_num(dem, nan=float(np.nanmin(dem[np.isfinite(dem)]))))
-    sea = np.isfinite(dem) & (dem <= a.waterline)
+    # Permanent channels only. Filling to the waterline would colour the whole intertidal.
+    sea = np.isfinite(dem) & (dem <= a.mlw)
 
     def ground(ax):
         """Terrain under every panel, so a channel is distinguishable from a road."""
@@ -225,10 +231,17 @@ def main():
             ax[i][j].set_title(f"{k}: {ttl}" if j == 0 else ttl, fontsize=10)
             fig.colorbar(im, ax=ax[i][j], fraction=0.046, label="depth (m)")
         ground(ax[i][2])
-        v = np.nanpercentile(np.abs(d), 99.5) or 0.05
+        # Scale on the cells that CHANGED. Taking a percentile over the whole domain
+        # collapses vmax to zero for a small footprint -- a floodwall edits ~163 cells in
+        # 600,000, so its 1.7 m cut fell outside a colourbar spanning 0.001 m.
+        ch = np.abs(d[np.isfinite(d) & (np.abs(d) > 0.005)])
+        v = float(np.percentile(ch, 99)) if ch.size else 0.05
         im = ax[i][2].imshow(np.where(np.abs(d) > 0.005, d, np.nan), cmap=cmap_d,
                              vmin=-v, vmax=v, interpolation="none", zorder=2)
         draw_footprint(ax[i][2], fp, FOOTPRINT.get(k, (None, "area"))[1])
+        if ch.size:
+            ax[i][2].text(0.01, 0.99, f"{ch.size:,} cells changed", transform=ax[i][2].transAxes,
+                          va="top", ha="left", fontsize=7.5, color="0.35")
         ax[i][2].set_title("change, with the edit outlined", fontsize=10)
         fig.colorbar(im, ax=ax[i][2], fraction=0.046, label="m")
         s = stats[k]
