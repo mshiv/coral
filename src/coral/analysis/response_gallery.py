@@ -55,28 +55,31 @@ def slr_of(name):
     return name.split("_")[0]
 
 
-def pick(manifest, per_kind_pref=None):
+def pick(manifest, slr=None, exclude=()):
     """One representative member per kind, plus the baseline at its sea level.
 
-    Prefers a member whose sea level has a baseline that actually ran, and prefers larger
-    area_frac so the figure shows a visible footprint rather than the smallest draw. This
-    is a figure, not a statistic: it shows what the operator does, and the ensemble-wide
-    distribution is the job of adaptation_effectiveness.
+    `slr` pins the sea level so every panel is comparable and so a level whose members
+    failed verification cannot be selected. Without it the largest area_frac wins, which
+    biases selection toward the highest offset -- and if that level did not conserve mass,
+    the whole figure is drawn from unusable runs. `exclude` drops named members.
+
+    This is a figure, not a statistic. It shows what an operator does to the flood; the
+    ensemble-wide distribution is the job of adaptation_effectiveness.
     """
+    ex = set(exclude)
     base = {slr_of(e["name"]): e for e in manifest if not kinds_of(e)}
     best = {}
     for e in manifest:
         ks = kinds_of(e)
-        if len(ks) != 1:
+        if len(ks) != 1 or e["name"] in ex:
             continue
-        k = ks[0]
-        if slr_of(e["name"]) not in base:
+        lvl = slr_of(e["name"])
+        if lvl not in base or (slr and lvl != slr):
             continue
         af = (e["interventions"][0] or {}).get("area_frac", 0.0) or 0.0
-        if per_kind_pref and k in per_kind_pref and per_kind_pref[k] in e["name"]:
-            af += 10.0                                    # force the named member to win
-        if k not in best or af > best[k][0]:
-            best[k] = (af, e)
+        if k := ks[0]:
+            if k not in best or af > best[k][0]:
+                best[k] = (af, e)
     return {k: (v[1], base[slr_of(v[1]["name"])]) for k, v in best.items()}
 
 
@@ -90,6 +93,10 @@ def main():
     ap.add_argument("--cell-m", type=float, default=4.0)
     ap.add_argument("--out", default="reports/figures/response_gallery.png")
     ap.add_argument("--out-json", default=None)
+    ap.add_argument("--slr", default=None,
+                    help="pin one sea level, e.g. slr0.0 or slrInt2050. Without it the\nlargest footprint wins, which biases selection toward the highest offset.")
+    ap.add_argument("--exclude", nargs="*", default=(),
+                    help="member names to skip, e.g. any that failed mass verification")
     a = ap.parse_args()
 
     import matplotlib
@@ -98,9 +105,10 @@ def main():
     from matplotlib.colors import LinearSegmentedColormap
 
     manifest = json.load(open(Path(a.ens) / "manifest.json"))
-    chosen = pick(manifest)
+    chosen = pick(manifest, a.slr, a.exclude)
     if not chosen:
-        raise SystemExit("no member/baseline pairs found; is the ensemble complete?")
+        raise SystemExit(f"no member/baseline pairs found for slr={a.slr!r}. "
+                         "Check the level name against the manifest.")
 
     dem, _ = read_asc(a.dem)
     land = np.isfinite(dem) & (dem > a.waterline)
