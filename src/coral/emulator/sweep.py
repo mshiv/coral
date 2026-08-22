@@ -267,6 +267,14 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
     staged = {p.name for p in (dem_p, man_p, ksat_p, cap_p) if p is not None}
     passthrough = [p for p in passthrough if p.name not in staged]
 
+    # The startfile primes the domain to a still-water level that must match the member's own
+    # boundary. Identified by the par rather than by name so a renamed grid still resolves.
+    start_p = None
+    for _p in passthrough:
+        if _p.suffix == ".asc" and _p.name.startswith("start"):
+            start_p = _p
+            break
+
     # Shared, deduplicated inputs. Copying every grid into every member costs about 120 MB
     # per member, and most of it is redundant: the .bdy depends only on the SLR level, so a
     # 306-member sweep over 6 levels writes 300 needless copies of a 69 MB file, and a grid
@@ -279,6 +287,39 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         p = shared / f"{bdy_p.stem}_slr{tag}{bdy_p.suffix}"
         if not p.exists():
             apply_slr_to_bdy(bdy_p, p, slr_m)
+        return p
+
+    def shared_start(slr_m, start_p, dem_path):
+        """One primed startfile per SLR offset, raised with the boundary it must match.
+
+        The boundary is offset by slr_m but the startfile was not, so the domain began up to
+        2 m below its own boundary. Water floods in at the first step and the run never
+        recovers: 283 members of the first production ensemble ended with relative volume
+        error near 1, all of them at the two highest offsets, with the timestep collapsed and
+        outflow at twice inflow. Below about 0.5 m of rise the step is small enough that the
+        solver absorbs it, which is why the failure appeared only at the top of the range.
+
+        A level startfile is max(bed, L), so where it exceeds the bed it equals L exactly.
+        That recovers the base level without needing the boundary series, and the raised file
+        is max(bed, L + slr_m).
+        """
+        tag = f"{slr_m:+.4f}".replace(".", "p")
+        p = shared / f"{start_p.stem}_slr{tag}{start_p.suffix}"
+        if p.exists():
+            return p
+        if abs(slr_m) < 1e-9:
+            return start_p
+        s0, _ = read_asc(str(start_p))
+        d0, _ = read_asc(str(dem_path))
+        above = np.where(np.isfinite(s0) & np.isfinite(d0) & (s0 > d0 + 1e-6), s0, np.nan)
+        if not np.isfinite(above).any():
+            raise SystemExit(
+                f"{start_p.name} is nowhere above the DEM, so it is not a level startfile and "
+                "cannot be raised for sea-level rise. Rebuild it with make_startfile --level.")
+        level = float(np.nanmedian(above)) + slr_m
+        new = np.where(np.isfinite(d0) & (d0 < level), level, d0)
+        write_ascii(str(p), new, str(dem_path))
+        print(f"  startfile for slr {slr_m:+.3f} m primed at {level:.3f} m -> {p.name}")
         return p
 
     def link(target, dest):
@@ -338,7 +379,13 @@ def build_sweep(base_dir, specs, out_root, *, root="res_matthew_sav",
         if cap_p:
             stage_grid(awc, awc0, cap_p, run / cap_p.name)
         link(shared_bdy(spec["slr_m"]), run / bdy_p.name)
+        # The startfile has to move with the boundary it primes. It is in `passthrough`, so
+        # link the raised copy first and let the exclusion below skip the base file.
+        if start_p is not None:
+            link(shared_start(spec["slr_m"], start_p, dem_p), run / start_p.name)
         for p in passthrough:
+            if start_p is not None and p.name == start_p.name:
+                continue
             if p.is_file():                       # .bci, .par, rain: never edited, so link
                 link(p, run / p.name)
         forcing = {"slr_m": spec["slr_m"]}
