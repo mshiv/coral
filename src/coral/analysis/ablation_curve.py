@@ -121,8 +121,7 @@ def main():
 
     # The control. Everything downstream is conditional on this.
     if a.control:
-        ctrl = [r for r in rows if r["slr_m"] == 0
-                and abs(r["n"] - 0.11) < 1e-9]
+        ctrl = [r for r in rows if r["slr_m"] == 0 and r["n"] is not None and r["n"] < 0]
         if ctrl:
             c = np.nan_to_num(rd(ctrl[0]["max"]), nan=0.0)
             b = np.nan_to_num(rd(a.control), nan=0.0)
@@ -134,7 +133,10 @@ def main():
                       "something other than roughness, and the curves below are not a clean "
                       "ablation.")
         else:
-            print("\ncontrol state not finished yet; curves are provisional")
+            print("\nno untouched-grid control state in this ablation. Setting the band to its "
+                  "own median is not a control: the band holds open-water and channel-edge cells "
+                  "below that median, so overwriting them changes the run. Restage with a "
+                  "negative state to add one.")
 
     print(f"\n{'state':22s} {'n':>6} {'slr':>6}  "
           f"{'platform p90':>12} {'land p90':>10} {'land >0.3m km2':>15} {'land vol Mm3':>13}")
@@ -166,13 +168,20 @@ def main():
     for j, (zn, key, lab) in enumerate(panels):
         for i, s in enumerate(slrs):
             pts = sorted([(r["n"], r[zn][key]) for r in rows
-                          if r["slr_m"] == s and r.get(zn)], key=lambda x: x[0])
+                          if r["slr_m"] == s and r.get(zn) and r["n"] and r["n"] > 0],
+                         key=lambda x: x[0])
             if len(pts) < 2:
                 continue
             x, y = zip(*pts)
             ax[j].plot(x, y, "o-", color=cmap(i / max(len(slrs) - 1, 1)),
                        label=f"SLR {s:.2f} m", lw=1.6, ms=4)
         ax[j].set_xscale("log")
+        # Explicit ticks: log minor labels collide at five closely spaced states and the axis
+        # becomes unreadable.
+        xs = sorted({r["n"] for r in rows if r["n"] and r["n"] > 0})
+        ax[j].set_xticks(xs)
+        ax[j].set_xticklabels([f"{x:g}" for x in xs], fontsize=8.5)
+        ax[j].minorticks_off()
         ax[j].set_xlabel("marsh Manning's $n$")
         ax[j].set_ylabel(lab)
         ax[j].grid(alpha=0.25, lw=0.5)

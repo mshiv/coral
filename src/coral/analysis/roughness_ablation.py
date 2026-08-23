@@ -126,7 +126,8 @@ def stage(a):
     manifest = []
     for mult in a.multipliers:
         for slr in a.slr:
-            tag = (f"n{mult:g}" if a.absolute else f"rough{mult:g}x") + f"_slr{slr:g}"
+            tag = ("base" if mult < 0 else
+                   (f"n{mult:g}" if a.absolute else f"rough{mult:g}x")) + f"_slr{slr:g}"
             tag = tag.replace(".", "p")
             d = out_root / tag
             d.mkdir(exist_ok=True)
@@ -144,7 +145,16 @@ def stage(a):
             if slr:
                 from ..emulator.sweep import apply_slr_to_bdy
                 apply_slr_to_bdy(bdy_p, d / bdy_p.name, slr)
-            edited = np.where(band, mult, man) if a.absolute else np.where(band, man * mult, man)
+            # A negative state is the sentinel for "leave the grid alone". The true control is
+            # the untouched base grid: setting the band to its own median is NOT a control,
+            # because the band contains open-water and channel-edge cells well below that
+            # median and overwriting them changes the run.
+            if mult < 0:
+                edited = man.copy()
+            elif a.absolute:
+                edited = np.where(band, mult, man)
+            else:
+                edited = np.where(band, man * mult, man)
             write_like(d / man_p.name, edited, man_p)
             manifest.append({"name": tag, "run_dir": str(d.resolve()),
                              "n_target" if a.absolute else "multiplier": float(mult),
@@ -172,8 +182,10 @@ def main():
     s.add_argument("--out", required=True)
     s.add_argument("--waterline", type=float, required=True)
     s.add_argument("--mlw", type=float, required=True)
-    s.add_argument("--multipliers", type=float, nargs="+", default=[0.02, 0.055, 0.11, 0.22, 0.44],
-                   help="roughness states. Absolute n by default; multipliers with --relative")
+    s.add_argument("--multipliers", type=float, nargs="+",
+                   default=[-1, 0.02, 0.055, 0.11, 0.22, 0.44],
+                   help="roughness states. Absolute n by default; multipliers with --relative. "
+                        "A negative value means leave the grid untouched, which is the control.")
     s.add_argument("--relative", dest="absolute", action="store_false",
                    help="treat the values as multipliers of the existing grid")
     s.set_defaults(absolute=True)
