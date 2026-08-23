@@ -344,7 +344,15 @@ def main(argv=None):
     print(f"  sea levels in training: {levels}")
     print(f"  kinds in training: {sorted({kind_of(s.name) for s in tr})}")
     if val:
-        print(f"  sea levels held out: {sorted({slr_key(s) for s in val})}")
+        # "represented in", not "held out": only --holdout-slr withholds whole levels. The
+        # other splits deliberately span every level in both sets, and calling that "held out"
+        # reads as though the split were far stronger than it is.
+        lv = sorted({slr_key(s) for s in val})
+        kn = sorted({kind_of(s.name) for s in val})
+        st = sorted({str(siting_of(s)) for s in val})
+        print(f"  validation set spans {len(lv)} sea levels {lv}")
+        print(f"                       {len(kn)} kinds {kn}")
+        print(f"                       siting {st}")
 
     schedule = a.subsample_per_kind or [None]
     results = []
