@@ -6,6 +6,9 @@
 # It does not need every member: train_ensemble.py reports coverage and trains on whatever
 # has finished. Run it at a few 100 members so the pipeline can be confirmed. 
 #
+#   sbatch workflows/slurm/02_train_emulator.sbatch perkind         # stratified, the headline
+#   sbatch workflows/slurm/02_train_emulator.sbatch combos          # singles -> portfolios
+#   sbatch workflows/slurm/02_train_emulator.sbatch siting          # random -> targeted
 #   sbatch workflows/slurm/02_train_emulator.sbatch                 # holdout sea levels
 #   sbatch workflows/slurm/02_train_emulator.sbatch valid           # validate on valid30m
 #   sbatch workflows/slurm/02_train_emulator.sbatch curve           # learning curve sweep
@@ -31,7 +34,11 @@ export SCR=/storage/home/hcoda1/6/smurugan9/scratch/coral
 export BASE=$SCR/runs/compound30m
 # Ensemble to train on. Overridable so the corrected-physics ensemble can be trained without
 # editing the script: train30m has neither marsh correction, train30m_full has both.
-TRAIN=${TRAIN:-$SCR/runs/train30m}
+# Default is the current production ensemble. It used to default to train30m, which is the
+# superseded 30 m design whose marsh members were built with an inert operator: a job launched
+# without setting TRAIN trained on last month's data and reported a healthy-looking result.
+# Override with TRAIN=... for the older ensembles.
+TRAIN=${TRAIN:-$SCR/runs/pp4_e01}
 VALID=${VALID:-$SCR/runs/valid30m}
 # Decoded-grid cache is keyed on resolved paths, but keep ensembles in separate caches so a
 # corrected and an uncorrected grid at the same path cannot collide.
@@ -44,6 +51,7 @@ bad() { echo "  [FAIL] $*"; }
 
 echo "============ CORAL emulator training, job $SLURM_JOB_ID on $(hostname) ============"
 log "mode=$MODE"
+log "ensemble=$TRAIN"
 
 module load anaconda3 cuda 2>/dev/null
 source activate coral 2>/dev/null || conda activate coral 2>/dev/null
@@ -99,6 +107,40 @@ log "grid cache: $CACHE ($(du -sh "$CACHE" 2>/dev/null | cut -f1) so far)"
 
 echo; echo "=== training ==="
 case "$MODE" in
+  perkind)
+    # The headline split. Holds out a fraction of members within every kind x sea level x
+    # siting cell, so both sets contain all seven interventions at all eight levels in both
+    # placement regimes. Answers "has it learned each intervention", which is the question
+    # every other result is read against. $2 = holdout fraction, default 0.2.
+    FRAC=${2:-0.2}
+    log "stratified per-kind holdout: $FRAC of each kind x level x siting cell"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" --holdout-per-kind "$FRAC" \
+      --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_perkind.pt" \
+      --report "$OUTDIR/emulator_unet_perkind.report.json" ;;
+  combos)
+    # Train on single interventions, validate on the two-intervention members. This is what
+    # decides whether the emulator can SEARCH adaptation space rather than only look up
+    # configurations it has seen: portfolio space is far larger than could ever be simulated.
+    log "portfolio holdout: single interventions train, two-intervention members validate"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" --holdout-combos \
+      --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_combos.pt" \
+      --report "$OUTDIR/emulator_unet_combos.report.json" ;;
+  siting)
+    # Train on random placements, validate on targeted ones: distribution shift in
+    # intervention geometry. Weaker for de-pave by construction, because its suitability
+    # driver is flat over a mostly dry impervious footprint and targeted placement there
+    # degenerates to a sized random subset. Report that kind separately.
+    HOLD=${2:-targeted}
+    log "placement-regime holdout: validating on siting=$HOLD"
+    python workflows/train_ensemble.py \
+      --ensemble "$TRAIN" --holdout-siting "$HOLD" \
+      --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
+      --ckpt "$OUTDIR/emulator_unet_siting_${HOLD}.pt" \
+      --report "$OUTDIR/emulator_unet_siting_${HOLD}.report.json" ;;
   holdout)
     # Hold out whole sea levels. A random split would leak: 250 members share each level,
     # so near-duplicates of every held-out case would sit in the training set.
@@ -198,7 +240,7 @@ case "$MODE" in
       --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_curve_placement.pt" \
       --report "$OUTDIR/emulator_unet_curve_placement.report.json" ;;
-  *) bad "unknown mode $MODE (use holdout, holdout-slr, holdout-kind, holdout-placement, curve-placement, valid, curve, or curve50)"; exit 1 ;;
+  *) bad "unknown mode $MODE (use perkind, combos, siting, holdout, holdout-slr, holdout-kind, holdout-placement, curve-placement, valid, curve, or curve50)"; exit 1 ;;
 esac
 RC=$?
 
