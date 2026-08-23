@@ -72,11 +72,44 @@ def marsh_band(dem, waterline, mlw):
     return np.isfinite(dem) & (dem >= mlw) & (dem <= waterline)
 
 
+def par_inputs(base):
+    """The files the par actually declares, not whatever sorts first in a glob.
+
+    A validated run directory can hold several boundary files and several grids from earlier
+    configurations. Globbing `*.bdy` there returned savannah_matthew_compound.bdy while the par
+    read savannah_matthew_compound_tide.bdy, so the sea-level offset was written to a file
+    nothing used, the real boundary passed through unchanged, and every member was primed for a
+    rise its boundary never received. Errors then grew with the offset and looked like a physics
+    problem at the high sea levels.
+
+    This is the third time in this project that selecting a file by pattern rather than by
+    declaration has produced a plausible wrong answer. Read the par.
+    """
+    pars = sorted(base.glob("*.par"))
+    if len(pars) != 1:
+        raise SystemExit(f"{base} holds {len(pars)} .par files; cannot tell which run this is. "
+                         "Point --base at a directory with exactly one.")
+    want = {}
+    for line in pars[0].read_text().splitlines():
+        s = line.split()
+        if len(s) == 2 and s[0].lower() in ("demfile", "manningfile", "bdyfile", "startfile"):
+            want[s[0].lower()] = base / s[1]
+    for k in ("demfile", "manningfile", "bdyfile"):
+        if k not in want:
+            raise SystemExit(f"{pars[0].name} declares no {k}")
+        if not want[k].exists():
+            raise SystemExit(f"{pars[0].name} declares {k} = {want[k].name}, which is not in {base}")
+    return pars[0], want
+
+
 def stage(a):
     base = Path(a.base)
-    dem_p = next(iter(sorted(base.glob("SUB_DEM_*.asc"))))
-    man_p = next(iter(sorted(base.glob("Manning_*.asc"))))
-    bdy_p = next(iter(sorted(base.glob("*.bdy"))))
+    par_p, want = par_inputs(base)
+    dem_p, man_p, bdy_p = want["demfile"], want["manningfile"], want["bdyfile"]
+    print(f"par {par_p.name} declares:")
+    for k in ("demfile", "manningfile", "bdyfile", "startfile"):
+        if k in want:
+            print(f"  {k:12s} {want[k].name}")
     dem, _ = read_asc(dem_p)
     man, _ = read_asc(man_p)
     band = marsh_band(dem, a.waterline, a.mlw)
@@ -89,7 +122,7 @@ def stage(a):
           f"p90={np.percentile(v, 90):.3f}")
 
     out_root = Path(a.out); out_root.mkdir(parents=True, exist_ok=True)
-    scenario = man_p.stem.split("_", 1)[1]
+    start_p = want.get("startfile")
     manifest = []
     for mult in a.multipliers:
         for slr in a.slr:
@@ -124,9 +157,10 @@ def stage(a):
     (out_root / "run_dirs.txt").write_text(
         "\n".join(m["run_dir"] for m in manifest) + "\n")
     print(f"\nstaged {len(manifest)} runs -> {out_root}")
-    print("  each needs its startfile primed at its own boundary level before submission:")
-    print("  the .bdy is offset per member, so a shared startfile puts the domain below its")
-    print("  own boundary and the run floods in at the first step.")
+    if start_p:
+        print(f"  startfile is {start_p.name}; prime one per offset before submitting.")
+    print("  The .bdy is offset per member, so a shared startfile leaves the domain out of")
+    print("  hydrostatic balance with its own boundary and the run floods in at the first step.")
 
 
 def main():
