@@ -24,7 +24,9 @@
 #SBATCH -p gpu-a100
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=48G
-#SBATCH --time=12:00:00
+# 24 h, not 12. At about 0.2 s per member per epoch, a 1540-member split needs roughly five
+# minutes an epoch, so a 300-epoch schedule is 27 hours and the 12 h limit truncated every run.
+#SBATCH --time=24:00:00
 #SBATCH --output=coral-train_%j.log
 
 set -uo pipefail
@@ -45,6 +47,9 @@ VALID=${VALID:-$SCR/runs/valid30m}
 CACHE_TAG=$(basename "$TRAIN")
 MODE=${1:-holdout}
 
+# stdout is a file here, so Python block-buffers it: four hours of training produced a log
+# under 4 KB with no epoch lines in it, which reads exactly like a hung job. python -u below
+# forces line buffering. Progress you cannot see is progress you will cancel.
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 ok()  { echo "  [OK]   $*"; }
 bad() { echo "  [FAIL] $*"; }
@@ -114,7 +119,7 @@ case "$MODE" in
     # every other result is read against. $2 = holdout fraction, default 0.2.
     FRAC=${2:-0.2}
     log "stratified per-kind holdout: $FRAC of each kind x level x siting cell"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --holdout-per-kind "$FRAC" \
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_perkind.pt" \
@@ -124,7 +129,7 @@ case "$MODE" in
     # decides whether the emulator can SEARCH adaptation space rather than only look up
     # configurations it has seen: portfolio space is far larger than could ever be simulated.
     log "portfolio holdout: single interventions train, two-intervention members validate"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --holdout-combos \
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_combos.pt" \
@@ -136,7 +141,7 @@ case "$MODE" in
     # degenerates to a sized random subset. Report that kind separately.
     HOLD=${2:-targeted}
     log "placement-regime holdout: validating on siting=$HOLD"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --holdout-siting "$HOLD" \
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_siting_${HOLD}.pt" \
@@ -144,7 +149,7 @@ case "$MODE" in
   holdout)
     # Hold out whole sea levels. A random split would leak: 250 members share each level,
     # so near-duplicates of every held-out case would sit in the training set.
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" \
       --holdout-slr IntHigh2100 High2100 \
       --epochs 300 --patience 10 --workers 8 \
@@ -154,7 +159,7 @@ case "$MODE" in
   valid)
     # The stronger test: train on random placements, validate on the targeted ensemble.
     [ -s "$VALID/manifest.json" ] || { bad "no $VALID; build it with 01_prep_ensemble pinpoint_valid30m valid30m"; exit 1; }
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --val-ensemble "$VALID" \
       --epochs 300 --patience 10 --workers 8 \
       --cache-dir "$CACHE" \
@@ -163,7 +168,7 @@ case "$MODE" in
   curve)
     # Does accuracy still improve with ensemble size? This is what decides whether to raise
     # n_per_kind from 50 to 100, which costs another 124 GB and about 12 hours of runs.
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" \
       --holdout-slr Int2070 \
       --subsample-per-kind 5 10 25 50 \
@@ -176,7 +181,7 @@ case "$MODE" in
     # timing out, and those checkpoints are already on disk; rerunning `curve` would spend
     # GPU hours recomputing them. --report is separate so the n<=25 report is not clobbered:
     # train_ensemble.py tags checkpoints with _n{N} but derives the report path from --ckpt.
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" \
       --holdout-slr Int2070 \
       --subsample-per-kind 50 \
@@ -189,7 +194,7 @@ case "$MODE" in
     # Hold out one sea level (extrapolation test). $2 = the SLR label, e.g. High2100.
     HOLD=${2:-High2100}
     log "holdout SLR: $HOLD"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --holdout-slr "$HOLD" \
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_holdout_slr_${HOLD}.pt" \
@@ -199,7 +204,7 @@ case "$MODE" in
     # $2 = the kind, e.g. seawall. Trains on the other four, predicts the fifth.
     HOLD=${2:-seawall}
     log "holdout kind: $HOLD"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --holdout-kind "$HOLD" \
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_holdout_kind_${HOLD}.pt" \
@@ -215,7 +220,7 @@ case "$MODE" in
     # type) are the complementary stress tests.
     THRESH=${2:-20}
     log "holdout placement: realisations >= $THRESH validate"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" --holdout-realisation "$THRESH" \
       --epochs 300 --patience 10 --workers 8 --cache-dir "$CACHE" \
       --ckpt "$OUTDIR/emulator_unet_holdout_placement.pt" \
@@ -232,7 +237,7 @@ case "$MODE" in
     # ensemble; a curve still falling at 20 says raise n_per_kind.
     THRESH=${2:-20}
     log "learning curve vs placement: realisations >= $THRESH validate, subsample 10/15/20"
-    python workflows/train_ensemble.py \
+    python -u workflows/train_ensemble.py \
       --ensemble "$TRAIN" \
       --holdout-realisation "$THRESH" \
       --subsample-per-kind 10 15 20 \
