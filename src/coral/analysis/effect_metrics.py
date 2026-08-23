@@ -151,6 +151,7 @@ def main():
         E = float(np.clip(d[~T & wet], 0, None).sum()) * cell
         dv = d[wet]
         r = {"name": e["name"], "kind": "+".join(ks), "slr": lvl,
+             "slr_m": float((e.get("forcing") or {}).get("slr_m", 0.0)),
              "siting": e.get("siting"),
              "wet_cells": int(wet.sum()),
              "mean_m": float(np.nanmean(dv)),
@@ -189,6 +190,10 @@ def main():
 
     # ---- per-kind summary, and whether the ordering survives sea-level rise
     by = defaultdict(list)
+    # Sea levels ordered by their offset, not by their label. Sorting the labels as strings put
+    # slrLow2050 (0.219 m) last and slrHigh2100 (2.043 m) third, so the rank-stability comparison
+    # ran between the two smallest offsets and reported a reversal that was not the one asked for.
+    lvl_m = {r["slr"]: r["slr_m"] for r in rows}
     for r in rows:
         by[(r["kind"], r["slr"])].append(r)
     print(f"\n{'kind':22s} {'slr':14s} {'n':>4} {'median benefit m3':>18} "
@@ -203,18 +208,26 @@ def main():
 
     print("\nintervention ranking by median benefit, per sea level "
           "(a reversal means the ordering is not stable):")
-    levels = sorted({s for _, s in by})
+    levels = sorted({s for _, s in by}, key=lambda s: lvl_m.get(s, 0.0))
     order = {}
     for s in levels:
         ks = [(k, np.median([x["benefit_m3"] for x in by[(k, s)]]))
               for (k, ss) in by if ss == s and "+" not in k]
         order[s] = [k for k, _ in sorted(ks, key=lambda x: -x[1])]
-        print(f"  {s:14s} {' > '.join(order[s])}")
+        print(f"  {s:14s} ({lvl_m.get(s, 0):.3f} m)  {' > '.join(order[s])}")
     if len(levels) > 1:
         first, last = order[levels[0]], order[levels[-1]]
         moved = [k for k in first if k in last and first.index(k) != last.index(k)]
-        print(f"\n{len(moved)} kind(s) change rank between {levels[0]} and {levels[-1]}"
+        print(f"\n{len(moved)} kind(s) change rank between {levels[0]} "
+              f"({lvl_m.get(levels[0],0):.3f} m) and {levels[-1]} ({lvl_m.get(levels[-1],0):.3f} m)"
               f"{': ' + ', '.join(moved) if moved else ''}")
+        print("\nbenefit against sea level, median m3 per kind:")
+        kinds = sorted({k for k, _ in by if "+" not in k})
+        print(f"  {'kind':20s} " + " ".join(f"{lvl_m.get(s,0):>9.2f}" for s in levels))
+        for k in kinds:
+            vals = [np.median([x["benefit_m3"] for x in by[(k, s)]]) if (k, s) in by else float("nan")
+                    for s in levels]
+            print(f"  {k:20s} " + " ".join(f"{v:9.0f}" for v in vals))
 
     print("\nNOTE: managed retreat lowers ground toward the surrounding grade, so it deepens water "
           "\nwhere a structure stood while removing the structure. Its depth-based benefit is not "
