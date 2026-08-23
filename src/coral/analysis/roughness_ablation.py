@@ -11,9 +11,14 @@ denominator. This turns it into a measurement.
 
 Everything except marsh roughness is held fixed: same domain, same boundary, same rainfall, same
 infiltration, same initial state. Only the Manning grid changes, and only over the marsh band.
-Multipliers deliberately reach beyond the sourced range: the members already applied about 2.2x
-and produced 3 mm, so testing 2x again proves nothing. If 8x still does nothing, friction is not
-the lever, and the result is a statement about the regime rather than about the sampled range.
+
+States are absolute roughness values rather than multipliers. The 30 m marsh band is uniform at
+n = 0.110, so a multiplier ladder reaches 0.88 by 8x, an order of magnitude past anything physical
+-- Chow puts the densest brush near 0.15 to 0.20. Absolute states also let the ladder run DOWNWARD,
+which matters because the strongest published counterexample does exactly that: replacing vegetated
+marsh roughness with a uniform open-water value raised mean inundated area by 59.2 percent across
+ten synthetic storms in Apalachicola Bay. Removing the marsh is a sharper test of whether roughness
+has purchase than adding implausible amounts of it.
 
 The 30 m domain is used rather than the 4 m Pin Point clip because the clip barely contains marsh
 -- restoration there edits 79,000 cells and moves 0.003 m partly because there is so little
@@ -88,7 +93,8 @@ def stage(a):
     manifest = []
     for mult in a.multipliers:
         for slr in a.slr:
-            tag = f"rough{mult:g}x_slr{slr:g}".replace(".", "p")
+            tag = (f"n{mult:g}" if a.absolute else f"rough{mult:g}x") + f"_slr{slr:g}"
+            tag = tag.replace(".", "p")
             d = out_root / tag
             d.mkdir(exist_ok=True)
             # Everything except the Manning grid is shared. Symlinked rather than copied: the
@@ -105,10 +111,11 @@ def stage(a):
             if slr:
                 from ..emulator.sweep import apply_slr_to_bdy
                 apply_slr_to_bdy(bdy_p, d / bdy_p.name, slr)
-            edited = np.where(band, man * mult, man)
+            edited = np.where(band, mult, man) if a.absolute else np.where(band, man * mult, man)
             write_like(d / man_p.name, edited, man_p)
             manifest.append({"name": tag, "run_dir": str(d.resolve()),
-                             "multiplier": float(mult), "slr_m": float(slr),
+                             "n_target" if a.absolute else "multiplier": float(mult),
+                             "slr_m": float(slr),
                              "band_cells": n_band,
                              "n_median_after": float(np.median(edited[band]))})
             print(f"  {tag:26s} n p50 {np.median(edited[band]):.3f}")
@@ -131,7 +138,11 @@ def main():
     s.add_argument("--out", required=True)
     s.add_argument("--waterline", type=float, required=True)
     s.add_argument("--mlw", type=float, required=True)
-    s.add_argument("--multipliers", type=float, nargs="+", default=[1, 2, 4, 8])
+    s.add_argument("--multipliers", type=float, nargs="+", default=[0.02, 0.055, 0.11, 0.22, 0.44],
+                   help="roughness states. Absolute n by default; multipliers with --relative")
+    s.add_argument("--relative", dest="absolute", action="store_false",
+                   help="treat the values as multipliers of the existing grid")
+    s.set_defaults(absolute=True)
     s.add_argument("--slr", type=float, nargs="+", default=[0.0, 0.301, 1.098, 2.043])
     s.set_defaults(func=stage)
     a = ap.parse_args()
