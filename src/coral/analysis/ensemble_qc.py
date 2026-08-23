@@ -303,20 +303,85 @@ def knobs(ens, manifest, out):
     print(f"wrote {out}")
 
 
+def siting_check(ens, manifest, base, waterline, mlw, cell_m=4.0):
+    """Do the linear structures sit on the shore, or through a tidal channel?
+
+    A floodwall or raised road follows a shoreline contour that the simplification step then
+    draws as straight segments between vertices. A contour wraps up one bank of every tidal
+    creek and back down the other, so simplifying a hairpin narrower than the tolerance
+    collapses it into a line ACROSS the creek mouth. The result is not a floodwall: it is an
+    ungated barrage, everything landward drops dramatically, and the member looks like a
+    spectacularly effective wall.
+
+    The test is where the edited cells sit in the tidal frame. A structure below mean low
+    water is in a permanently wet channel and cannot have been built without a gate. Some
+    intertidal footprint is expected and correct -- a bulkhead sits at the waterline -- so
+    only the subtidal fraction is a defect.
+
+    Reported per member rather than pooled, because one wall through one creek is enough to
+    dominate an effectiveness statistic.
+    """
+    dem, _ = read_asc(base if str(base).endswith(".asc")
+                      else next(iter(sorted(Path(base).glob("SUB_DEM*.asc")))))
+    rows, worst = [], []
+    for e in manifest:
+        ks = kinds_of(e)
+        if not any(k in ("floodwall", "road_raise") for k in ks):
+            continue
+        f = Path(e["run_dir"]) / next(iter(sorted(
+            p.name for p in Path(base).glob("SUB_DEM*.asc"))), "")
+        if not f.exists() or f.is_symlink():
+            continue
+        d = np.abs(np.nan_to_num(read_asc(f)[0], nan=0.0) - np.nan_to_num(dem, nan=0.0)) > 1e-6
+        n = int(d.sum())
+        if not n:
+            continue
+        sub = int((d & (dem <= mlw)).sum())
+        inter = int((d & (dem > mlw) & (dem <= waterline)).sum())
+        rows.append((e["name"], ks, n, sub / n, inter / n))
+        if sub / n > 0.05:
+            worst.append((e["name"], n, 100 * sub / n))
+
+    if not rows:
+        raise SystemExit("no floodwall or road_raise members with an edited DEM found")
+    fr = np.array([r[3] for r in rows])
+    print(f"{len(rows)} linear-structure members")
+    print(f"  subtidal fraction: median {100*np.median(fr):.2f}%  p90 {100*np.percentile(fr,90):.2f}%"
+          f"  max {100*fr.max():.2f}%")
+    print(f"  intertidal fraction: median {100*np.median([r[4] for r in rows]):.1f}%")
+    if worst:
+        print(f"\n{len(worst)} member(s) with more than 5% of the structure below MLW - these are"
+              "\nbarrages across a channel, not walls, and their reductions are not credible:")
+        for nm, n, pc in sorted(worst, key=lambda x: -x[2])[:20]:
+            print(f"  {nm:34s} {n:6d} cells  {pc:5.1f}% subtidal")
+    else:
+        print("\nno member places more than 5% of its structure below MLW: "
+              "walls follow the shore rather than closing channels.")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["noop", "panels", "coverage", "section", "knobs"])
+    ap.add_argument("cmd", choices=["noop", "panels", "coverage", "section", "knobs",
+                                "siting"])
     ap.add_argument("--ens", required=True, help="ensemble directory with manifest.json")
     ap.add_argument("--base", default=None, help="baseline run dir, for the grid comparisons")
     ap.add_argument("--per-kind", type=int, default=25)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--waterline", type=float, default=1.114, help="MHW, the land/sea split")
+    ap.add_argument("--mlw", type=float, default=-1.091,
+                    help="MLW; structure cells below this are in a permanent channel")
     a = ap.parse_args()
     ens, m = load(a.ens)
     default = f"reports/figures/qc_{a.cmd}.png"
     if a.cmd == "noop":
         check_noop(ens, m)
+    elif a.cmd == "siting":
+        if not a.base:
+            raise SystemExit("siting needs --base, the baseline run directory")
+        siting_check(ens, m, a.base, a.waterline, a.mlw)
     elif a.cmd == "knobs":
         knobs(ens, m, a.out or default)
     else:
