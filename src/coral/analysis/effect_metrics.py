@@ -122,7 +122,9 @@ def main():
     if not base:
         raise SystemExit("no finished baselines; effects are undefined without them")
 
-    rows, n = [], 0
+    import time
+    rows, n, t0 = [], 0, time.time()
+    todo = sum(1 for e in manifest if kinds_of(e))
     for e in manifest:
         ks = kinds_of(e)
         if not ks:
@@ -168,6 +170,12 @@ def main():
                                           - float((land & (b > t)).sum())) * cell / 1e6
         rows.append(r)
         n += 1
+        # Progress, because this reads two ASCII grids per member across nearly two thousand
+        # members and a silent multi-hour job is indistinguishable from a stuck one.
+        if n % 50 == 0 or n == todo:
+            el = time.time() - t0
+            print(f"  {n}/{todo} members  {el/60:.1f} min elapsed  "
+                  f"~{el/n*(todo-n)/60:.0f} min remaining", flush=True)
         if a.limit and n >= a.limit:
             break
 
