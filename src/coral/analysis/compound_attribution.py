@@ -153,7 +153,8 @@ def _plot_effect(C, N, wet, args):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(1, 3, figsize=(16, 5.2))
+    PAL_C, PAL_N = "#7a3b8f", "#c26a3d"
+    fig, ax = plt.subplots(1, 3, figsize=(17, 5.2))
     for a, arr, ttl, cm in (
             (ax[0], np.where(wet, C, np.nan), "compound effect C = full - max(single)", "magma_r"),
             (ax[1], np.where(wet, N, np.nan), "nonlinear residual N", "RdBu_r")):
@@ -164,11 +165,36 @@ def _plot_effect(C, N, wet, args):
         a.set_xticks([]); a.set_yticks([])
         fig.colorbar(im, ax=a, fraction=0.046, label="m")
 
-    ax[2].hist(C[wet], bins=80, alpha=0.75, label="C", color="#7a3b8f")
-    ax[2].hist(N[wet], bins=80, alpha=0.6, label="N", color="#c26a3d")
-    ax[2].axvline(0, color="0.3", lw=0.8)
-    ax[2].set_xlabel("m"); ax[2].set_ylabel("wet land cells"); ax[2].legend()
-    ax[2].set_title("C is not N", fontsize=11)
+    # Exceedance rather than a histogram. Both fields pile at zero and overlap there, so a
+    # histogram shows the mode and hides the claim. The claim is a tail statistic: over what
+    # fraction of floodplain does a separate-driver maximum underestimate depth by at least x.
+    # Plotting it that way also puts the published comparison on the same axes instead of in
+    # a sentence.
+    c = np.sort(np.maximum(C[wet], 0))[::-1]
+    frac = np.arange(1, c.size + 1) / c.size
+    ax[2].plot(c, 100 * frac, color=PAL_C, lw=2, label="C = full - max(single driver)")
+    n_ = np.sort(np.abs(N[wet]))[::-1]
+    ax[2].plot(n_, 100 * np.arange(1, n_.size + 1) / n_.size, color=PAL_N, lw=1.4,
+               ls="--", label="|N| = |departure from superposition|")
+    for x in (0.1, 0.2):
+        pc = 100 * (c >= x).mean()
+        ax[2].plot([x, x], [0, pc], color="0.55", lw=0.8, ls=":")
+        ax[2].annotate(f"{pc:.1f}% at {x:g} m", xy=(x, pc), xytext=(x + 0.06, pc + 4),
+                       fontsize=9, color="0.25")
+    # Gori et al. 2020: a post-processed maximum of separate rainfall and storm-tide runs
+    # underestimated 100-year depths by >=0.2 m over 16.1% of floodplain, across 941 storms.
+    ax[2].plot(0.2, 16.1, "o", ms=7, mfc="none", mec="0.35", mew=1.4)
+    ax[2].annotate("Gori et al. (2020)\n16.1% at 0.2 m", xy=(0.2, 16.1), xytext=(0.34, 22),
+                   fontsize=8.5, color="0.35",
+                   arrowprops=dict(arrowstyle="-", color="0.6", lw=0.7))
+    ax[2].set_xlim(0, max(0.6, float(np.percentile(c, 99.5))))
+    ax[2].set_ylim(0, 100)
+    ax[2].set_xlabel("underestimate (m)")
+    ax[2].set_ylabel("percent of wet floodplain at or above")
+    ax[2].legend(fontsize=8, frameon=False, loc="upper right")
+    ax[2].grid(alpha=0.25, lw=0.5)
+    ax[2].set_title("what a separate-driver maximum misses", fontsize=11)
+
     fig.suptitle("Compound effect against nonlinear residual", fontsize=13)
     fig.tight_layout()
     Path(args.out_fig).parent.mkdir(parents=True, exist_ok=True)
