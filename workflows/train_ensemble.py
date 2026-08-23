@@ -66,6 +66,10 @@ def load_runs(ensembles):
         entries = json.load(open(mf))
         for r in entries:
             r["ensemble"] = str(Path(d).name)
+            # siting is a top-level manifest key but only `forcing` reaches the sample, so
+            # a split could not see it. Carry it across.
+            f = r.setdefault("forcing", {})
+            f.setdefault("siting", r.get("siting"))
         runs += entries
         print(f"  {mf}: {len(entries)} planned members")
     return runs
@@ -119,15 +123,60 @@ def realisation_index(name):
     return int(m.group(1)) if m else None
 
 
+def siting_of(sample):
+    """random / targeted / None (baselines)."""
+    return sample.forcing.get("siting")
+
+
 def is_combo(name):
     """Members carrying more than one intervention. sweep names them slr<level>_combo<n>."""
     return "_combo" in name
 
 
 def split(samples, holdout_slr=(), holdout_kind=(), holdout_frac=0.0, seed=0,
-          holdout_realisation=None, holdout_combos=False):
+          holdout_realisation=None, holdout_combos=False, holdout_siting=None,
+          holdout_per_kind=0.0):
     """Return (train, val) plus a description of how the split was made."""
     import numpy as np
+    if holdout_per_kind:
+        # Stratified within every (kind, sea level, siting) cell: the test set contains
+        # members of EVERY intervention kind, at every sea level, in both siting modes, and
+        # so does the training set. This is the split that asks whether the emulator has
+        # learned each intervention rather than whether it can interpolate one forcing level.
+        #
+        # --holdout-realisation looks similar and is not: siting is assigned by position, so
+        # low indices are targeted and high indices random, and holding out high indices
+        # tests random placements only.
+        rng = np.random.default_rng(seed)
+        cells = {}
+        for s in samples:
+            cells.setdefault((kind_of(s.name), slr_key(s), siting_of(s)), []).append(s)
+        te = []
+        for key, members in sorted(cells.items(), key=lambda kv: str(kv[0])):
+            if key[0] == "base":
+                continue                      # baselines stay in training; they anchor the mask
+            idx = rng.permutation(len(members))
+            n = max(1, int(round(holdout_per_kind * len(members))))
+            te += [members[i] for i in idx[:n]]
+        held = {id(s) for s in te}
+        tr = [s for s in samples if id(s) not in held]
+        how = (f"stratified {holdout_per_kind:.0%} holdout within each kind x sea level x "
+               f"siting cell ({len(te)} members): unseen members of every intervention kind")
+        return tr, te, how
+    if holdout_siting:
+        # Train on one placement regime, test on the other. Random placements sample the
+        # wider spatial response; targeted placements are where a planner would actually
+        # build. This is distribution shift in intervention geometry, and it is the test
+        # that decides whether a tool trained on broad sampling can be trusted on the
+        # narrow set a user will draw.
+        te = [s for s in samples if siting_of(s) == holdout_siting]
+        tr = [s for s in samples if siting_of(s) != holdout_siting]
+        if not te:
+            raise SystemExit(f"no members with siting={holdout_siting!r}; the manifest may "
+                             "predate siting being recorded per member.")
+        how = (f"trained on {len(tr)} members, held out {len(te)} with siting="
+               f"{holdout_siting}: transfer across placement regime")
+        return tr, te, how
     if holdout_combos:
         # Train on single interventions, test on members carrying two. This is the split
         # that decides whether the emulator can be used to SEARCH adaptation space rather
@@ -227,6 +276,11 @@ def main(argv=None):
                          "trace the learning curve against ensemble size")
     ap.add_argument("--holdout-combos", action="store_true",
                     help="train on single interventions, test on two-intervention members")
+    ap.add_argument("--holdout-siting", choices=["targeted", "random"], default=None,
+                    help="hold out one placement regime, e.g. train random, test targeted")
+    ap.add_argument("--holdout-per-kind", type=float, default=0.0,
+                    help="stratified holdout fraction within each kind x sea level x siting "
+                         "cell, so every kind appears in both train and test")
     ap.add_argument("--holdout-realisation", type=int, default=None,
                     help="withhold realisation indices >= N across all kinds and sea levels; "
                          "tests unseen placements of known intervention types")
@@ -278,7 +332,7 @@ def main(argv=None):
     else:
         tr, val, how = split(samples, a.holdout_slr, a.holdout_kind,
                              a.holdout_frac, a.seed, a.holdout_realisation,
-                             a.holdout_combos)
+                             a.holdout_combos, a.holdout_siting, a.holdout_per_kind)
 
     if a.limit:
         tr = tr[:a.limit]
