@@ -73,6 +73,38 @@ def slr_of(name):
     return name.split("_")[0]
 
 
+# The grid each kind writes its footprint into. A kind with two levers is counted on the one
+# that carries its geometry, so the number means "how much was built" rather than "how many
+# fields moved".
+FOOTPRINT_FIELD = {"floodwall": "SUB_DEM", "road_raise": "SUB_DEM", "retreat": "SUB_DEM",
+                   "living_shoreline": "SUB_DEM", "marsh_restoration": "Manning",
+                   "marsh_migration": "Manning", "depave": "Manning"}
+
+
+def footprint_cells(run_dir, base_dir, kinds, cache):
+    """Cells the member actually edited, from the grids rather than the manifest.
+
+    Benefit alone ranks by how much was built as much as by how well it works: a living-shoreline
+    member edits sixty times more cells than a floodwall, so it leads on total benefit while being
+    far less effective per unit built. Both rankings are wanted, and this is the denominator for
+    the second.
+    """
+    fields = {FOOTPRINT_FIELD.get(k, "Manning") for k in kinds}
+    total = 0
+    for fld in fields:
+        b = cache.get(fld)
+        if b is None:
+            hits = sorted(Path(base_dir).glob(f"{fld}_*.asc"))
+            if not hits:
+                continue
+            b = cache[fld] = np.nan_to_num(rd(hits[0]), nan=0.0)
+        m = sorted(Path(run_dir).glob(f"{fld}_*.asc"))
+        if not m or m[0].is_symlink():
+            continue
+        total += int((np.abs(np.nan_to_num(rd(m[0]), nan=0.0) - b) > 1e-6).sum())
+    return total
+
+
 def target_zone(shape, hdr, ref_lon, ref_lat, radius_km):
     """Circle around the community. Benefit inside, adverse effect outside.
 
@@ -101,6 +133,9 @@ def main():
                     metavar=("LON", "LAT"))
     ap.add_argument("--focus-radius-km", type=float, default=2.0)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--base", default=None,
+                    help="baseline input dir. With it, the edited-cell count is recovered per "
+                         "member and benefit per unit built is reported alongside total benefit.")
     ap.add_argument("--out-csv", default="reports/adapt/effect_metrics.csv")
     a = ap.parse_args()
 
@@ -123,6 +158,7 @@ def main():
         raise SystemExit("no finished baselines; effects are undefined without them")
 
     import time
+    base_cache = {}
     rows, n, t0 = [], 0, time.time()
     todo = sum(1 for e in manifest if kinds_of(e))
     for e in manifest:
@@ -166,6 +202,12 @@ def main():
              "spillover_ratio": E / (B + 1e-9),
              "signed_volume_m3": float(np.nansum(dv)) * cell,
              "abs_volume_m3": float(np.nansum(np.abs(dv))) * cell}
+        fp = footprint_cells(e["run_dir"], a.base, ks, base_cache) if a.base else 0
+        r["footprint_cells"] = fp
+        r["footprint_m2"] = fp * cell
+        # Benefit per unit built. Total benefit ranks partly by how much was constructed;
+        # this ranks by how well the construction works.
+        r["benefit_per_m2"] = (B / (fp * cell)) if fp else float("nan")
         for t in THRESHOLDS:
             r[f"d_area_ge_{t:g}m_km2"] = (float((land & (m > t)).sum())
                                           - float((land & (b > t)).sum())) * cell / 1e6
@@ -206,6 +248,25 @@ def main():
               f"{np.median([x['adverse_m3'] for x in v]):18.0f} "
               f"{100*np.median([x['frac_worsened'] for x in v]):7.2f}")
 
+    def _rank(metric, label):
+        print(f"\nranking by median {label}, per sea level:")
+        o = {}
+        for s in levels:
+            ks = [(k, np.nanmedian([x[metric] for x in by[(k, s)]]))
+                  for (k, ss) in by if ss == s and "+" not in k]
+            ks = [(k, v) for k, v in ks if np.isfinite(v)]
+            o[s] = [k for k, _ in sorted(ks, key=lambda x: -x[1])]
+            print(f"  {s:14s} ({lvl_m.get(s, 0):.3f} m)  {' > '.join(o[s])}")
+        if len(levels) > 1 and o[levels[0]] and o[levels[-1]]:
+            f_, l_ = o[levels[0]], o[levels[-1]]
+            mv = [(k, f_.index(k) + 1, l_.index(k) + 1) for k in f_
+                  if k in l_ and f_.index(k) != l_.index(k)]
+            print(f"  {len(mv)} rank change(s) between {lvl_m.get(levels[0],0):.2f} m "
+                  f"and {lvl_m.get(levels[-1],0):.2f} m")
+            for k, i, j in mv:
+                print(f"    {k:20s} {i} -> {j}")
+        return o
+
     print("\nintervention ranking by median benefit, per sea level "
           "(a reversal means the ordering is not stable):")
     levels = sorted({s for _, s in by}, key=lambda s: lvl_m.get(s, 0.0))
@@ -228,6 +289,12 @@ def main():
             vals = [np.median([x["benefit_m3"] for x in by[(k, s)]]) if (k, s) in by else float("nan")
                     for s in levels]
             print(f"  {k:20s} " + " ".join(f"{v:9.0f}" for v in vals))
+
+    if any(r.get("footprint_cells") for r in rows):
+        _rank("benefit_per_m2", "benefit per m2 built")
+        print("\nTotal benefit and benefit per unit built answer different questions. The first "
+              "\nasks what to build given a free hand; the second asks what is worth building "
+              "\ngiven a fixed one. They do not give the same ordering here.")
 
     print("\nNOTE: managed retreat lowers ground toward the surrounding grade, so it deepens water "
           "\nwhere a structure stood while removing the structure. Its depth-based benefit is not "

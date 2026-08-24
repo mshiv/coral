@@ -50,6 +50,7 @@ python -u -m coral.analysis.effect_metrics \
   --cell-m "$CELL" \
   --ref-point "$REF_LON" "$REF_LAT" \
   --focus-radius-km "$RADIUS" \
+  --base "$SCR/runs/$BASE" \
   --out-csv "reports/adapt/effect_metrics_${ENS}.csv"
 RC=$?
 
