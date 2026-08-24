@@ -128,7 +128,10 @@ def main():
             diff = np.abs(c - b)
             print(f"\ncontrol {ctrl[0]['name']} against the staged base:"
                   f"  max|diff| {diff.max():.3e} m  mean {diff.mean():.3e} m")
-            if diff.max() > 1e-3:
+            # LISFLOOD writes depth at 0.01 m precision, so a control that agrees to one
+            # representable step has reproduced its base. A stricter threshold flags the file
+            # format rather than the staging.
+            if diff.max() > 0.0101 or diff.mean() > 1e-4:
                 print("  WARNING: the control does not reproduce its base. The staging changed "
                       "something other than roughness, and the curves below are not a clean "
                       "ablation.")
