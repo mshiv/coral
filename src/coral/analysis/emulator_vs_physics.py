@@ -47,14 +47,14 @@ def pick_members(report, n_mid=1):
     runs = report.get("runs") or []
     per = None
     for r in runs:
-        for k in ("val_members", "held_out", "members", "per_member"):
+        for k in ("holdout_metrics", "val_members", "held_out", "members", "per_member"):
             if isinstance(r.get(k), list) and r[k]:
                 per = r[k]; break
         if per:
             break
     if not per:
         raise SystemExit("no per-member block in the report; cannot choose members")
-    key = next((k for k in ("rmse", "rmse_m", "wet_rmse", "RMSE") if k in per[0]), None)
+    key = next((k for k in ("rmse_m", "rmse", "wet_rmse", "RMSE") if k in per[0]), None)
     if key is None:
         raise SystemExit(f"no rmse field in per-member records: {list(per[0])}")
     per = sorted(per, key=lambda x: x[key])
