@@ -44,9 +44,17 @@ def pick_members(report, n_mid=1):
     chapter quotes: a member picked by a second, slightly different metric could disagree with
     the reported ranking and invite a question about which is right.
     """
+    # Training reports store metrics inside ``runs`` because one invocation can fit several
+    # learning-curve models. External checkpoint evaluation writes one model and therefore
+    # stores the same records at the report top level. Accept both without changing how
+    # members are ranked.
+    per = next((report[k] for k in
+                ("holdout_metrics", "val_members", "held_out", "members", "per_member")
+                if isinstance(report.get(k), list) and report[k]), None)
     runs = report.get("runs") or []
-    per = None
     for r in runs:
+        if per:
+            break
         for k in ("holdout_metrics", "val_members", "held_out", "members", "per_member"):
             if isinstance(r.get(k), list) and r[k]:
                 per = r[k]; break
