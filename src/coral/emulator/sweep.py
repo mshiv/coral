@@ -550,9 +550,13 @@ def _asc_header(path):
     return h
 
 
-def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
+def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None, specs=None):
     """Build the ensemble from a scenario's `interventions` config (Phase 3). Resolves the
-    SAGIS context rasters (wetlands/soil_ksat/buildings) from the config paths and the DEM."""
+    SAGIS context rasters (wetlands/soil_ksat/buildings) from the config paths and the DEM.
+
+    `specs` overrides the sampled design. Everything else -- context rasters, datums, siting
+    drivers, staging -- is resolved identically, so a probe ensemble differs from production in
+    its knob values alone and nothing else has to be kept in step by hand."""
     iv = cfg.interventions
     if iv is None:
         raise SystemExit(f"scenario {cfg.name!r} has no `interventions:` block")
@@ -589,9 +593,10 @@ def from_config(cfg, base_dir, out_root, *, root="res_matthew_sav", nlcd=None):
         from ..preprocess.fetch_slr import slr_levels as resolve_slr_scenarios
         targets = [(scen, year) for scen, year in iv.slr_scenarios]
         slr_levels_all += resolve_slr_scenarios(targets, station=cfg.forcing.tide_station)
-    specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed,
-                       seawall_walls=iv.seawall_walls, siting=iv.siting,
-                       targeted_frac=iv.targeted_frac)
+    if specs is None:
+        specs = plan_sweep(slr_levels_all, iv.kinds, iv.n_per_kind, iv.include_combos, iv.seed,
+                           seawall_walls=iv.seawall_walls, siting=iv.siting,
+                           targeted_frac=iv.targeted_frac)
     # The tidal frame comes from the scenario so the migration band, the roughness threshold
     # and the shoreline contour cannot drift apart.
     #
