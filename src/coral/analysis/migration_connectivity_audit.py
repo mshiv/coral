@@ -75,9 +75,9 @@ def audit(a):
     legacy_reference_score = score(reference_focus, legacy=True)
     legacy_n_fixed = max(1, round(a.area_frac * np.count_nonzero(legacy_reference_score > 0)))
     production_fixed_legacy = _ranked(score(focus, legacy=True), legacy_n_fixed, a.seed)
-    corrected_reference_score = score(reference_focus)
-    corrected_n_fixed = max(1, round(a.area_frac * np.count_nonzero(corrected_reference_score > 0)))
-    production_fixed_corrected = _ranked(score(focus), corrected_n_fixed, a.seed)
+    # Hold the realised footprint fixed when comparing the old and corrected eligibility
+    # rules. Otherwise exclusion of wetland changes both location and area.
+    production_fixed_corrected = _ranked(score(focus), legacy_n_fixed, a.seed)
 
     distance = ndimage.distance_transform_edt(~wet) * a.cell_m
     proximity = eligible & (distance <= a.proximity_m)
