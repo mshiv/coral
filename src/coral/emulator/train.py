@@ -31,7 +31,56 @@ def metrics(pred, target, mask, thresh=0.10):
     return float(rmse), float(csi)
 
 
-def evaluate(model, dataset, device, thresh=0.10, workers=0):
+def detailed_metrics(pred, target, mask, thresh=0.10, cell_m=None):
+    """Decision-facing field and extent metrics for one member.
+
+    RMSE/MAE/bias are evaluated where the parent model is wet above ``thresh``. Detection
+    metrics use all modeled land. Area and volume totals use ``cell_m`` when supplied.
+    Normalization uses target standard deviation and the robust p95-p05 spread; unlike the
+    full range, neither denominator is controlled by one extreme cell.
+    """
+    import torch
+    m = mask.bool()
+    wet = m & (target > thresh)
+    pf, tf = (pred > thresh) & m, (target > thresh) & m
+    tp = (pf & tf).sum().float(); fp = (pf & ~tf).sum().float()
+    fn = (~pf & tf).sum().float()
+    csi = tp / (tp + fp + fn + 1e-6)
+    pod = tp / (tp + fn + 1e-6)
+    far = fp / (tp + fp + 1e-6)
+    if wet.any():
+        err = (pred - target)[wet]
+        rmse = torch.sqrt((err ** 2).mean())
+        mae = err.abs().mean(); bias = err.mean(); max_abs = err.abs().max()
+        sd = target[wet].std(unbiased=False)
+        q05, q95 = torch.quantile(target[wet], torch.tensor([.05, .95], device=target.device))
+        spread = q95 - q05
+        nrmse_sd = rmse / sd if sd > 1e-8 else torch.tensor(float("nan"), device=target.device)
+        nrmse_robust = rmse / spread if spread > 1e-8 else torch.tensor(float("nan"), device=target.device)
+    else:
+        rmse = mae = bias = max_abs = nrmse_sd = nrmse_robust = \
+            torch.tensor(float("nan"), device=target.device)
+    area_m2 = float(cell_m) ** 2 if cell_m else 1.0
+    true_area = tf.sum().float() * area_m2
+    pred_area = pf.sum().float() * area_m2
+    true_vol = torch.where(m, target.clamp_min(0), 0).sum() * area_m2
+    pred_vol = torch.where(m, pred.clamp_min(0), 0).sum() * area_m2
+    area_err_pct = 100 * (pred_area - true_area) / (true_area + 1e-6)
+    vol_err_pct = 100 * (pred_vol - true_vol) / (true_vol + 1e-6)
+    return {
+        "rmse_m": float(rmse), "mae_m": float(mae), "bias_m": float(bias),
+        "max_abs_error_m": float(max_abs), "nrmse_sd": float(nrmse_sd),
+        "nrmse_p95_p05": float(nrmse_robust), "csi": float(csi),
+        "probability_of_detection": float(pod), "false_alarm_ratio": float(far),
+        "flooded_area_error_pct": float(area_err_pct), "flood_volume_error_pct": float(vol_err_pct),
+        "target_flooded_area_km2": float(true_area / 1e6) if cell_m else None,
+        "predicted_flooded_area_km2": float(pred_area / 1e6) if cell_m else None,
+        "target_flood_volume_Mm3": float(true_vol / 1e6) if cell_m else None,
+        "predicted_flood_volume_Mm3": float(pred_vol / 1e6) if cell_m else None,
+    }
+
+
+def evaluate(model, dataset, device, thresh=0.10, workers=0, cell_m=None):
     """Per-sample (rmse, csi) over `dataset`, in dataset order. Returns a list of dicts
     keyed by sample name so a report can show which scenarios the emulator handles worst."""
     import torch
@@ -41,10 +90,12 @@ def evaluate(model, dataset, device, thresh=0.10, workers=0):
     dl = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=workers)
     with torch.no_grad():
         for s, (X, y, mask) in zip(dataset.samples, dl):
-            r, c = metrics(model(X.to(device)), y.to(device), mask.to(device), thresh)
-            rows.append({"name": s.name, "rmse_m": r, "csi": c,
-                         "slr_m": float(s.forcing.get("slr_m", 0.0)),
-                         "slr_label": s.forcing.get("slr_label")})
+            rec = detailed_metrics(model(X.to(device)), y.to(device), mask.to(device),
+                                   thresh, cell_m=cell_m)
+            rec.update({"name": s.name,
+                        "slr_m": float(s.forcing.get("slr_m", 0.0)),
+                        "slr_label": s.forcing.get("slr_label")})
+            rows.append(rec)
     return rows
 
 
