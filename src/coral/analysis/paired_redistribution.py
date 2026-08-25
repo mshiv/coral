@@ -37,6 +37,9 @@ def main():
     ap.add_argument("--waterline", type=float, required=True)
     ap.add_argument("--cell-m", type=float, required=True)
     ap.add_argument("--tol-m", type=float, default=0.01)
+    ap.add_argument("--field-tol", type=float, default=1e-3,
+                    help="minimum edited-grid change defining the intervention footprint; "
+                         "must exceed ASCII rounding noise")
     ap.add_argument("--wet-m", type=float, default=0.05)
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-fig", required=True)
@@ -55,7 +58,7 @@ def main():
         g0, g1 = read(p), read(q)
         if g0.shape != c.shape or g1.shape != c.shape:
             raise SystemExit(f"field pair does not align: {spec}")
-        footprint |= np.nan_to_num(np.abs(g1 - g0), nan=0.0) > 1e-6
+        footprint |= np.nan_to_num(np.abs(g1 - g0), nan=0.0) > a.field_tol
     if not footprint.any():
         raise SystemExit("no edited cells found in --fields")
 
@@ -73,15 +76,17 @@ def main():
         m = wet & (dist_km >= lo) & (dist_km < hi)
         radial.append({"lo_km": float(lo), "hi_km": None if np.isinf(hi) else float(hi),
                        "wet_cells": int(m.sum()),
-                       "benefit_m3": float(np.clip(-delta[m], 0, None).sum() * area),
-                       "adverse_m3": float(np.clip(delta[m], 0, None).sum() * area)})
+                       "benefit_m3": float((-delta[m & better]).sum() * area),
+                       "adverse_m3": float(delta[m & worse].sum() * area)})
     report = {"wet_cells": int(wet.sum()), "footprint_cells": int(footprint.sum()),
               "footprint_m2": float(footprint.sum() * area),
               "improved_cells": int(better.sum()), "worsened_cells": int(worse.sum()),
               "improved_fraction": float(better.sum() / max(wet.sum(), 1)),
               "worsened_fraction": float(worse.sum() / max(wet.sum(), 1)),
-              "benefit_m3": float(np.clip(-delta[wet], 0, None).sum() * area),
-              "adverse_m3": float(np.clip(delta[wet], 0, None).sum() * area),
+              "benefit_m3": float((-delta[better]).sum() * area),
+              "adverse_m3": float(delta[worse].sum() * area),
+              "depth_tolerance_m": float(a.tol_m),
+              "field_tolerance": float(a.field_tol),
               "max_reduction_m": float(-np.nanmin(delta)),
               "max_increase_m": float(np.nanmax(delta)), "distance_bins": radial}
     outj = Path(a.out_json); outj.parent.mkdir(parents=True, exist_ok=True)
@@ -99,10 +104,12 @@ def main():
     for aa, z, title in zip(ax[:2], (c, x), ("Control peak depth", "Intervention peak depth")):
         im = aa.imshow(np.where(land, z, np.nan)[sl], cmap="Blues", vmin=0, vmax=vmax)
         aa.set_title(title); aa.set_axis_off(); fig.colorbar(im, ax=aa, shrink=.75, label="m")
-    v = np.nanpercentile(np.abs(delta[wet]), 99) if wet.any() else .1
-    im = ax[2].imshow(delta[sl], cmap="RdBu_r", vmin=-v, vmax=v)
+    material = wet & (np.abs(delta) >= a.tol_m)
+    v = np.nanpercentile(np.abs(delta[material]), 99) if material.any() else a.tol_m
+    display = np.where(material, delta, np.nan)
+    im = ax[2].imshow(display[sl], cmap="RdBu_r", vmin=-v, vmax=v)
     ax[2].contour(footprint[sl], levels=[.5], colors="black", linewidths=.6)
-    ax[2].set_title("Depth change (intervention − control)"); ax[2].set_axis_off()
+    ax[2].set_title(f"Material depth change (|Δh| ≥ {a.tol_m:g} m)"); ax[2].set_axis_off()
     fig.colorbar(im, ax=ax[2], shrink=.75, label="m")
     labels = [f"{r['lo_km']:g}–{r['hi_km']:g}" if r['hi_km'] is not None
               else f">{r['lo_km']:g}" for r in radial]

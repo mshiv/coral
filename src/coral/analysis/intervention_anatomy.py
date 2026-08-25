@@ -32,7 +32,7 @@ LABELS = {"floodwall": "Floodwall", "road_raise": "Raised road",
           "marsh_migration": "Marsh migration", "retreat": "Managed retreat"}
 COLORS = {"floodwall": "#D55E00", "road_raise": "#E69F00",
           "living_shoreline": "#009E73", "depave": "#56B4E9",
-          "marsh_restoration": "#0072B2", "marsh_migration": "#CC79A7",
+          "marsh_restoration": "#7A9A32", "marsh_migration": "#CC79A7",
           "retreat": "#6B6B6B"}
 FIELD_LABEL = {"dem": r"elevation $\Delta z$ (m)",
                "manning": r"roughness $\Delta n$",
@@ -223,7 +223,7 @@ def _build_hub(records, dem, out, siting, cell_m):
         fig.text(pair_left, pair_top + .006,
                  f"({letter}) {LABELS[kind]} — {area/1e4:.1f} ha member; "
                  f"local {SHORT_FIELD[primary]} edit",
-                 fontsize=7.7, fontweight="bold", ha="left", va="bottom")
+                 fontsize=9.0, fontweight="bold", ha="left", va="bottom")
         for spine in ax.spines.values():
             spine.set_linewidth(1.5); spine.set_edgecolor(COLORS[kind])
 
@@ -233,9 +233,9 @@ def _build_hub(records, dem, out, siting, cell_m):
             metric.plot(xx, vals["z"], color="#777777", lw=1.1, label="before")
             metric.plot(xx, vals["z"] + vals["dz"], color=COLORS[kind], lw=1.05,
                         label="after")
-            metric.set_xlabel("normal distance (m)", fontsize=6.1, labelpad=1)
-            metric.set_ylabel("elevation (m)", fontsize=6.1, labelpad=1)
-            metric.legend(fontsize=5.5, frameon=False, ncol=2, loc="best")
+            metric.set_xlabel("normal distance (m)", fontsize=7.4, labelpad=1)
+            metric.set_ylabel("elevation (m)", fontsize=7.4, labelpad=1)
+            metric.legend(fontsize=6.5, frameon=False, ncol=2, loc="best")
             ax.plot(coords[1]-c0, coords[0]-r0, color="white", lw=1.0, ls="--")
         else:
             vals = delta[primary][pmask]
@@ -245,10 +245,10 @@ def _build_hub(records, dem, out, siting, cell_m):
             med, lo, hi = np.median(vals), np.percentile(vals, 5), np.percentile(vals, 95)
             metric.axvline(med, color="#111111", lw=.9, ls="--")
             metric.text(.98, .94, f"median {med:+.3f}\n5–95% {lo:+.3f} to {hi:+.3f}",
-                        transform=metric.transAxes, ha="right", va="top", fontsize=5.4)
-            metric.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=6.1, labelpad=1)
-            metric.set_ylabel("edited cells (%)", fontsize=6.1, labelpad=1)
-        metric.tick_params(labelsize=5.6, pad=1)
+                        transform=metric.transAxes, ha="right", va="top", fontsize=6.4)
+            metric.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=7.4, labelpad=1)
+            metric.set_ylabel("edited cells (%)", fontsize=7.4, labelpad=1)
+        metric.tick_params(labelsize=6.7, pad=1)
         metric.grid(alpha=.14)
 
     fig.suptitle(f"Representative {siting} intervention placement and field edits",
