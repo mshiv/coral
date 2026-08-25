@@ -3,7 +3,8 @@
 # Run from the repo root (~/scratch/savannah_matthew). Pass the path to your
 # existing Matthew run as $1.
 #
-#   bash scripts/assemble_geoclaw_run.sh  ~/path/to/matthew_2016_MSLtide_0.81
+#   bash src/coral/geoclaw/assemble_geoclaw_run.sh \
+#       ~/path/to/matthew_2016_MSLtide_0.81 geoclaw_dorian_l6
 #
 # Result: ./geoclaw_run ready to `make .data && make .output`.
 # templates/setrun.py has the 63 coupling gauges + 5 NOAA stations inlined and the Pin Point
@@ -11,14 +12,23 @@
 # inlined, so nothing else needs editing.
 
 set -euo pipefail
-MATTHEW="${1:?usage: assemble_geoclaw_run.sh <path-to-existing-matthew-run>}"
-DEST="geoclaw_run"
+MATTHEW="${1:?usage: assemble_geoclaw_run.sh <source-run> [destination]}"
+DEST="${2:-geoclaw_run}"
 
 if [ ! -f "$MATTHEW/setrun.py" ]; then
     echo "ERROR: $MATTHEW doesn't look like a GeoClaw run (no setrun.py)"; exit 1
 fi
 if [ ! -f templates/setrun.py ]; then
     echo "ERROR: run from the repo root (templates/setrun.py not found)"; exit 1
+fi
+SRC_REAL="$(cd "$MATTHEW" && pwd -P)"
+DEST_PARENT="$(cd "$(dirname "$DEST")" && pwd -P)"
+DEST_REAL="$DEST_PARENT/$(basename "$DEST")"
+if [ "$SRC_REAL" = "$DEST_REAL" ]; then
+    echo "ERROR: source and destination are the same directory: $SRC_REAL"; exit 1
+fi
+if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+    echo "ERROR: destination already exists: $DEST"; exit 1
 fi
 
 # 1. copy the base run WITHOUT the heavy/derived bits
@@ -60,6 +70,14 @@ fi
 export CORAL_SCENARIO
 echo "scenario: $CORAL_SCENARIO"
 ( cd "$DEST" && make .data )
+
+# GeoClaw writes absolute paths into topo.data, surge.data and flagregions.data. Refuse to
+# hand off a directory whose generated inputs point somewhere else (for example because it was
+# generated and then renamed).
+if grep -R -F "$DEST_PARENT/geoclaw_run/" --include='*.data' "$DEST" >/dev/null 2>&1 \
+   && [ "$(basename "$DEST")" != "geoclaw_run" ]; then
+    echo "ERROR: generated .data contains a stale geoclaw_run path"; exit 1
+fi
 
 # 5. verify (gauge count is dynamic: coupling gauges + any dense obs gauges from
 #    gen_boundary_points --obs-spacing-m; the header line of gauges.data reports it)
