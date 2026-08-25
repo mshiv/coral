@@ -37,6 +37,12 @@ COLORS = {"floodwall": "#D55E00", "road_raise": "#E69F00",
 FIELD_LABEL = {"dem": r"elevation $\Delta z$ (m)",
                "manning": r"roughness $\Delta n$",
                "ksat": r"$\Delta K_{sat}$", "awc": r"$\Delta$ storage"}
+PRIMARY_FIELD = {"floodwall": "dem", "road_raise": "dem",
+                 "living_shoreline": "dem", "retreat": "dem",
+                 "depave": "manning", "marsh_restoration": "manning",
+                 "marsh_migration": "manning"}
+SHORT_FIELD = {"dem": "elevation", "manning": "Manning n",
+               "ksat": "infiltration rate", "awc": "storage"}
 
 
 def _base_files(base):
@@ -101,12 +107,37 @@ def _crop(mask, pad=30):
             slice(max(0, c.min()-pad), min(mask.shape[1], c.max()+pad+1)))
 
 
+def _largest_component(mask):
+    from scipy import ndimage
+    lab, n = ndimage.label(mask, structure=np.ones((3, 3), int))
+    if n == 0:
+        return mask
+    counts = np.bincount(lab.ravel()); counts[0] = 0
+    return lab == counts.argmax()
+
+
+def _normal_section(component, arrays, half_width=75):
+    """Sample arrays normal to the principal axis of one edited component."""
+    from scipy.ndimage import map_coordinates
+    rc = np.column_stack(np.where(component))
+    centre = rc.mean(0)
+    if len(rc) > 2:
+        _, _, vh = np.linalg.svd(rc - centre, full_matrices=False)
+        normal = vh[1]                 # second PC is normal to a linear feature
+    else:
+        normal = np.array([1.0, 0.0])
+    s = np.linspace(-half_width, half_width, 2 * half_width + 1)
+    coords = centre[:, None] + normal[:, None] * s
+    values = {k: map_coordinates(a, coords, order=1, mode="nearest")
+              for k, a in arrays.items()}
+    return s, coords, values
+
+
 def build(ensemble, base, effect_csv, out, *, slr="slrInt2050", siting="targeted"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.colors import LightSource
-    from matplotlib.lines import Line2D
 
     manifest = json.load(open(Path(ensemble) / "manifest.json"))
     picks = _choose_members(effect_csv, manifest, slr, siting)
@@ -131,78 +162,78 @@ def build(ensemble, base, effect_csv, out, *, slr="slrInt2050", siting="targeted
 
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 8,
                          "axes.spines.top": False, "axes.spines.right": False})
-    fig = plt.figure(figsize=(13.2, 12.8), constrained_layout=False)
-    outer = fig.add_gridspec(3, 4, height_ratios=[1.32, 1, 1], hspace=.30, wspace=.20)
-    ax0 = fig.add_subplot(outer[0, :])
+    fig = plt.figure(figsize=(13.2, 8.8), constrained_layout=False)
+    outer = fig.add_gridspec(2, 4, hspace=.34, wspace=.23)
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    ax0.imshow(bg, interpolation="nearest")
-    for kind, name, area, rd, delta, mask in records:
-        ax0.contour(mask.astype(float), levels=[.5], colors=[COLORS[kind]], linewidths=1.25)
-    handles = [Line2D([0], [0], color=COLORS[k], lw=2, label=LABELS[k])
-               for k, *_ in records]
-    ax0.legend(handles=handles, ncol=4, loc="lower center", frameon=True,
-               bbox_to_anchor=(.5, -.01), fontsize=8)
-    ax0.set_title("A  Representative intervention footprints in the common 4 m domain",
-                  loc="left", fontweight="bold", fontsize=11)
-    ax0.set_xticks([]); ax0.set_yticks([])
 
     for i, (kind, name, area, rd, delta, mask) in enumerate(records):
-        cell = outer[1 + i//4, i % 4].subgridspec(2, 1, height_ratios=[1.38, 1], hspace=.12)
+        cell = outer[i//4, i % 4].subgridspec(2, 1, height_ratios=[1.5, 1], hspace=.15)
         amap = fig.add_subplot(cell[0])
         apro = fig.add_subplot(cell[1])
-        sl = _crop(mask)
+        primary = PRIMARY_FIELD[kind]
+        pmask = np.abs(delta[primary]) > TOL
+        component = _largest_component(pmask)
+        sl = _crop(component, pad=35)
         amap.imshow(bg[sl], interpolation="nearest")
-        # Draw every changed field; precedence keeps thin DEM structures visible.
-        for field in ("awc", "ksat", "manning", "dem"):
-            if field not in delta:
-                continue
-            m = np.abs(delta[field][sl]) > TOL
-            amap.contourf(m.astype(float), levels=[.5, 1.5], colors=[COLORS[kind]], alpha=.62)
-        amap.contour(mask[sl].astype(float), levels=[.5], colors=["#111111"], linewidths=.55)
+        local = component[sl]
+        if primary == "dem" and kind in ("floodwall", "road_raise"):
+            amap.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=2.2)
+            amap.contour(local.astype(float), levels=[.5], colors=[COLORS[kind]], linewidths=1.05)
+        else:
+            amap.contourf(local.astype(float), levels=[.5, 1.5],
+                          colors=[COLORS[kind]], alpha=.68)
+            amap.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=.65)
         amap.set_xticks([]); amap.set_yticks([])
-        fields = ", ".join(FIELD_LABEL[k].replace("$", "") for k in delta)
-        amap.set_title(f"{'BCDEFGH'[i]}  {LABELS[kind]}\n{area/1e4:.1f} ha; edits {fields}",
-                       loc="left", fontsize=8.4, fontweight="bold", color="#222222")
+        fields = ", ".join(SHORT_FIELD[k] for k in delta)
+        amap.set_title(f"{'ABCDEFG'[i]}  {LABELS[kind]}\n{area/1e4:.1f} ha member; "
+                       f"local {SHORT_FIELD[primary]} feature",
+                       loc="left", fontsize=8.2, fontweight="bold", color="#222222")
 
-        orient, idx = _profile(mask)
-        edited_line = _slice_profile(mask, orient, idx)
-        q = np.flatnonzero(edited_line)
-        lo, hi = max(0, q.min()-50), min(edited_line.size, q.max()+51)
-        x = np.arange(lo, hi) * cell_m
         if "dem" in delta:
-            z0 = _slice_profile(dem, orient, idx)[lo:hi]
-            dz = _slice_profile(delta["dem"], orient, idx)[lo:hi]
+            s, coords, vals = _normal_section(component, {"z": dem, "dz": delta["dem"]})
+            x = s * cell_m
+            z0, dz = vals["z"], vals["dz"]
             apro.plot(x, z0, color="#777777", lw=1.4, label="before")
             apro.plot(x, z0 + dz, color=COLORS[kind], lw=1.2, label="after")
             apro.set_ylabel("elevation (m)", fontsize=7)
+            # Show the exact section on the zoom.
+            r0, c0 = sl[0].start, sl[1].start
+            apro.set_xlabel("distance normal to feature (m)", fontsize=7)
+            amap.plot(coords[1]-c0, coords[0]-r0, color="white", lw=1.1, ls="--")
         else:
-            order = [k for k in ("manning", "ksat", "awc") if k in delta]
-            for j, field in enumerate(order):
-                y = _slice_profile(delta[field], orient, idx)[lo:hi]
-                apro.plot(x, y, color=COLORS[kind], lw=1.2,
-                          ls=("-", "--", ":")[j], label=FIELD_LABEL[field])
-            apro.axhline(0, color="#888888", lw=.6)
-            apro.set_ylabel("parameter change", fontsize=7)
-        apro.set_xlabel("distance along section (m)", fontsize=7)
+            # A distribution is more honest than a long section through disconnected masks.
+            vals = delta[primary][pmask]
+            apro.hist(vals, bins=24, color=COLORS[kind], alpha=.82, edgecolor="white", lw=.3)
+            med, lo, hi = np.median(vals), np.percentile(vals, 5), np.percentile(vals, 95)
+            apro.axvline(med, color="#111111", lw=1.0, ls="--")
+            apro.text(.98, .92, f"median {med:+.3f}\n5–95% {lo:+.3f} to {hi:+.3f}",
+                      transform=apro.transAxes, ha="right", va="top", fontsize=6.4)
+            apro.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=7)
+            apro.set_ylabel("edited cells", fontsize=7)
         apro.tick_params(labelsize=6.5)
-        apro.legend(fontsize=6, frameon=False, loc="best")
+        if "dem" in delta:
+            apro.legend(fontsize=6, frameon=False, loc="best")
         apro.grid(alpha=.16)
+        amap.text(.02, .02, "edits: " + fields, transform=amap.transAxes, fontsize=6.2,
+                  bbox=dict(fc="white", ec="none", alpha=.82, pad=1.6))
 
-    # Blank eighth card becomes a compact reading key.
+    # Blank eighth card becomes the reading key and prevents another dense overview map.
     if len(records) < 8:
-        key = fig.add_subplot(outer[2, 3]); key.axis("off")
+        key = fig.add_subplot(outer[1, 3]); key.axis("off")
         key.text(0, 1, "How to read this figure", va="top", fontweight="bold", fontsize=9)
-        key.text(0, .82, "Outline: union of all edited cells\n"
-                         "Colour: intervention footprint\n"
-                         "Profile: DEM before/after, or\nparameter change when terrain is fixed\n\n"
+        key.text(0, .82, "Map: largest contiguous feature in the\n"
+                         "member's primary edited field\n"
+                         "Dashed line: DEM section normal to feature\n"
+                         "Histogram: actual cellwise parameter changes\n\n"
                          "Representative case: targeted Int2050\nnearest the median footprint",
                  va="top", fontsize=7.5, linespacing=1.35)
-    fig.suptitle("Interventions are physical edits, not categorical labels",
+    fig.suptitle("How each intervention enters the hydraulic model",
                  fontsize=14, fontweight="bold", y=.985)
-    fig.text(.5, .012, "Real ensemble members. The overview establishes placement; local cards expose "
-             "the field and magnitude supplied to the hydraulic model.", ha="center", fontsize=8.5)
+    fig.text(.5, .012, "Real targeted Int2050 ensemble members nearest each family's median footprint. "
+             "Zooms show one representative contiguous feature; reported hectares refer to the full member.",
+             ha="center", fontsize=8.3)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
     fig.savefig(Path(out).with_suffix(".pdf"), bbox_inches="tight", facecolor="white")
