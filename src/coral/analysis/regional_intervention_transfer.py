@@ -38,24 +38,41 @@ def grid(directory, prefix):
     return hits[0]
 
 
-def transfer_dem(source_base, source_edit, target_base, out, tol=0.01):
+def transfer_dem(source_base, source_edit, target_base, out, tol=0.01, mode="max",
+                 source_cell_m=4.0, target_cell_m=30.0):
     from rasterio.crs import CRS
     from rasterio.warp import Resampling, reproject
     b4, h4 = read_asc(source_base); e4, he = read_asc(source_edit)
     b30, h30 = read_asc(target_base)
     if not aligned(b4, h4, e4, he):
         raise SystemExit("source DEMs do not align")
-    changed4 = np.isfinite(b4) & np.isfinite(e4) & (e4 > b4 + tol)
-    crest4 = np.where(changed4, e4, -9999).astype("float32")
-    crest30 = np.full(b30.shape, -9999, "float32")
-    reproject(crest4, crest30, src_transform=transform(h4), dst_transform=transform(h30),
+    valid = np.isfinite(b4) & np.isfinite(e4)
+    changed4 = valid & (e4 > b4 + tol)
+    target = np.full(b30.shape, -9999, "float32")
+    if mode == "max":
+        source = np.where(changed4, e4, -9999).astype("float32")
+        resampling = Resampling.max
+    elif mode == "average":
+        # Untreated valid subcells contribute zero, so a sill occupying one sixth of a coarse
+        # cell contributes one sixth of its rise rather than raising the whole cell to its crest.
+        source = np.where(valid, e4 - b4, -9999).astype("float32")
+        resampling = Resampling.average
+    else:
+        raise ValueError(f"unknown DEM transfer mode {mode}")
+    reproject(source, target, src_transform=transform(h4), dst_transform=transform(h30),
               src_crs=CRS.from_epsg(4326), dst_crs=CRS.from_epsg(4326),
-              src_nodata=-9999, dst_nodata=-9999, resampling=Resampling.max)
-    hit = np.isfinite(b30) & (crest30 > -9990)
-    result = np.where(hit, np.maximum(b30, crest30), b30)
+              src_nodata=-9999, dst_nodata=-9999, resampling=resampling)
+    hit = np.isfinite(b30) & (target > -9990)
+    result = (np.where(hit, np.maximum(b30, target), b30) if mode == "max"
+              else np.where(hit, b30 + target, b30))
     changed30 = hit & (result > b30 + tol)
     write_like(out, result, target_base)
-    return {"source_dem_cells": int(changed4.sum()), "target_dem_cells": int(changed30.sum())}
+    return {"dem_transfer_mode": mode, "source_dem_cells": int(changed4.sum()),
+            "source_dem_area_m2": float(changed4.sum() * source_cell_m ** 2),
+            "target_dem_cells": int(changed30.sum()),
+            "target_dem_area_m2": float(changed30.sum() * target_cell_m ** 2),
+            "source_added_volume_m3": float(np.sum((e4-b4)[changed4]) * source_cell_m ** 2),
+            "target_added_volume_m3": float(np.sum((result-b30)[changed30]) * target_cell_m ** 2)}
 
 
 def transfer_manning(source_base, source_edit, target_base, out, tol=1e-6):
@@ -104,6 +121,11 @@ def main():
     ap.add_argument("--target-control", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--snapshot-s", type=float, default=1800)
+    ap.add_argument("--source-cell-m", type=float, default=4.0)
+    ap.add_argument("--target-cell-m", type=float, default=30.0)
+    ap.add_argument("--dem-mode", choices=("auto", "max", "average"), default="auto",
+                    help="auto uses max for raised roads and fractional average rise for living "
+                         "shorelines; run both as a representation sensitivity when warranted")
     ap.add_argument("--selection-rule", default="targeted Int2050 member nearest median footprint")
     a = ap.parse_args()
 
@@ -122,10 +144,14 @@ def main():
 
     stats = {}
     if a.kind in DEM_KINDS:
+        dem_mode = ("average" if a.kind == "living_shoreline" else "max") \
+            if a.dem_mode == "auto" else a.dem_mode
         (root / "intervention" / dem_name).unlink()
         stats.update(transfer_dem(grid(a.source_base, "SUB_DEM"),
                                   grid(a.source_member, "SUB_DEM"), want["demfile"],
-                                  root / "intervention" / dem_name))
+                                  root / "intervention" / dem_name, mode=dem_mode,
+                                  source_cell_m=a.source_cell_m,
+                                  target_cell_m=a.target_cell_m))
     if a.kind in MANNING_KINDS:
         (root / "intervention" / man_name).unlink()
         stats.update(transfer_manning(grid(a.source_base, "Manning"),
@@ -136,7 +162,8 @@ def main():
     report = {"kind": a.kind, "source_member": str(Path(a.source_member).resolve()),
               "target_control": str(target.resolve()), "selection_rule": a.selection_rule,
               "snapshot_s": a.snapshot_s, "aggregation": {
-                  "DEM": "maximum absolute crest", "Manning": "area-average delta n^2"},
+                  "DEM": stats.get("dem_transfer_mode", "not edited"),
+                  "Manning": "area-average delta n^2"},
               **stats}
     (root / "manifest.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2)); print(f"staged regional pair -> {root}")
