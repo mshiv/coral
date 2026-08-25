@@ -107,7 +107,7 @@ def plot(dem, ex, rows, masks, out):
     import matplotlib.pyplot as plt
     from matplotlib.colors import LightSource
     from matplotlib.patches import Patch
-    fig, axes = plt.subplots(2, 3, figsize=(13, 8.2), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(13, 8.2))
     ax = axes.ravel()
     x = np.arange(len(rows)); labels = [r["label"] for r in rows]
     ax[0].plot(x, [r["eligible_new_land_ha"] for r in rows], "o-", label="eligible new land")
@@ -140,9 +140,11 @@ def plot(dem, ex, rows, masks, out):
                         Patch(fc="#009E73", alpha=.50, label="connected"),
                         Patch(fc="none", ec="#CC79A7", label="production fixed-area selection"),
                         Patch(fc="none", ec="#0072B2", label="connectivity-gated fixed area")],
-               loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(.5, -.01))
+               loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(.5, .012))
     fig.suptitle("Marsh-migration opportunity versus community focus radius",
                  fontsize=14, fontweight="bold")
+    # Reserve a real footer for the map legend; do not overlay the lower maps.
+    fig.tight_layout(rect=(0, .105, 1, .96))
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
     fig.savefig(Path(out).with_suffix(".pdf"), bbox_inches="tight", facecolor="white")
