@@ -133,8 +133,8 @@ def _normal_section(component, arrays, half_width=75):
     return s, coords, values
 
 
-def _build_hub(records, dem, out, siting):
-    """Full-domain locator surrounded by seven zoom + mechanism cards."""
+def _build_hub(records, dem, out, siting, cell_m):
+    """Top-left domain locator with mechanism cards along its right and lower edges."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -144,33 +144,53 @@ def _build_hub(records, dem, out, siting):
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    fig = plt.figure(figsize=(15, 12.5))
-    centre = fig.add_axes([.245, .29, .51, .53])
-    positions = [[.015, .675, .21, .275], [.015, .355, .21, .275], [.015, .035, .21, .275],
-                 [.775, .675, .21, .275], [.775, .355, .21, .275], [.775, .035, .21, .275],
-                 [.395, .015, .21, .245]]
+    fig = plt.figure(figsize=(18, 12))
+    centre = fig.add_axes([.035, .415, .59, .49])
+    # Three compact cards beside the domain and four deeper cards below it.
+    # ``side`` cards place map and diagnostic side by side; ``bottom`` cards stack them.
+    positions = [
+        (.65, .748, .325, .157, "side"),
+        (.65, .576, .325, .157, "side"),
+        (.65, .404, .325, .157, "side"),
+        (.035, .055, .218, .300, "bottom"),
+        (.272, .055, .218, .300, "bottom"),
+        (.509, .055, .218, .300, "bottom"),
+        (.746, .055, .218, .300, "bottom"),
+    ]
     centre.imshow(bg, interpolation="nearest")
     centre.set_xticks([]); centre.set_yticks([])
-    centre.set_title("Full 4 m domain — complete primary-field footprints",
+    centre.set_title("Full 4 m domain — representative edits within numbered zoom boxes",
                      fontsize=10, fontweight="bold")
 
     for i, ((kind, name, area, rd, delta, mask), pos) in enumerate(zip(records, positions)):
         primary = PRIMARY_FIELD[kind]
         pmask = np.abs(delta[primary]) > TOL
         component = _largest_component(pmask)
-        # Complete member is deliberately faint; the selected feature and box stay legible.
-        centre.contour(pmask.astype(float), levels=[.5], colors=[COLORS[kind]],
-                       linewidths=.55, alpha=.55)
         sl = _crop(component, pad=35)
         r0, r1, c0, c1 = sl[0].start, sl[0].stop, sl[1].start, sl[1].stop
+        # Do not paint distributed masks over the whole domain.  Show the actual member
+        # edits only inside the matching locator box; the zoom then resolves one feature.
+        clipped = np.zeros_like(pmask, dtype=bool)
+        clipped[sl] = pmask[sl]
+        if primary == "dem" and kind in ("floodwall", "road_raise"):
+            centre.contour(clipped.astype(float), levels=[.5], colors=[COLORS[kind]],
+                           linewidths=1.15, alpha=.95)
+        else:
+            centre.contourf(clipped.astype(float), levels=[.5, 1.5],
+                            colors=[COLORS[kind]], alpha=.46)
         centre.add_patch(Rectangle((c0, r0), c1-c0, r1-r0, fill=False,
-                                   ec=COLORS[kind], lw=2.1, zorder=8))
+                                   ec=COLORS[kind], lw=2.8, zorder=8))
         centre.text(c0+5, r0+5, str(i+1), ha="left", va="top", fontsize=7.5,
                     fontweight="bold", color="white", zorder=9,
                     bbox=dict(boxstyle="round,pad=.20", fc=COLORS[kind], ec="white", lw=.6))
 
-        x, y, w, h = pos
-        ax = fig.add_axes([x, y + .40*h, w, .56*h])
+        x, y, w, h, card_layout = pos
+        if card_layout == "side":
+            ax = fig.add_axes([x, y, .49*w, h])
+            metric = fig.add_axes([x + .57*w, y + .12*h, .41*w, .69*h])
+        else:
+            ax = fig.add_axes([x, y + .43*h, w, .53*h])
+            metric = fig.add_axes([x + .04*w, y + .04*h, .92*w, .29*h])
         ax.imshow(bg[sl], interpolation="nearest")
         local = component[sl]
         if primary == "dem" and kind in ("floodwall", "road_raise"):
@@ -180,20 +200,19 @@ def _build_hub(records, dem, out, siting):
             ax.contourf(local.astype(float), levels=[.5, 1.5], colors=[COLORS[kind]], alpha=.72)
             ax.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=.65)
         ax.set_xticks([]); ax.set_yticks([])
-        ax.set_title(f"{i+1}  {LABELS[kind]}\n{area/1e4:.1f} ha member; {SHORT_FIELD[primary]}",
-                     fontsize=8, fontweight="bold", loc="left")
+        ax.set_title(f"{i+1}  {LABELS[kind]}\n{area/1e4:.1f} ha; {SHORT_FIELD[primary]}",
+                     fontsize=7.5, fontweight="bold", loc="left", pad=2)
         for spine in ax.spines.values():
             spine.set_linewidth(1.5); spine.set_edgecolor(COLORS[kind])
 
-        metric = fig.add_axes([x, y, w, .31*h])
         if "dem" in delta:
             s, coords, vals = _normal_section(component, {"z": dem, "dz": delta["dem"]})
-            xx = s * 4.0
+            xx = s * cell_m
             metric.plot(xx, vals["z"], color="#777777", lw=1.1, label="before")
             metric.plot(xx, vals["z"] + vals["dz"], color=COLORS[kind], lw=1.05,
                         label="after")
-            metric.set_xlabel("distance normal to feature (m)", fontsize=6.3)
-            metric.set_ylabel("elevation (m)", fontsize=6.3)
+            metric.set_xlabel("normal distance (m)", fontsize=6.1, labelpad=1)
+            metric.set_ylabel("elevation (m)", fontsize=6.1, labelpad=1)
             metric.legend(fontsize=5.5, frameon=False, ncol=2, loc="best")
             ax.plot(coords[1]-c0, coords[0]-r0, color="white", lw=1.0, ls="--")
         else:
@@ -204,17 +223,17 @@ def _build_hub(records, dem, out, siting):
             metric.axvline(med, color="#111111", lw=.9, ls="--")
             metric.text(.98, .94, f"median {med:+.3f}\n5–95% {lo:+.3f} to {hi:+.3f}",
                         transform=metric.transAxes, ha="right", va="top", fontsize=5.4)
-            metric.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=6.3)
-            metric.set_ylabel("cells", fontsize=6.3)
-        metric.tick_params(labelsize=5.7)
+            metric.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=6.1, labelpad=1)
+            metric.set_ylabel("cells", fontsize=6.1, labelpad=1)
+        metric.tick_params(labelsize=5.6, pad=1)
         metric.grid(alpha=.14)
 
     fig.suptitle(f"Representative {siting} intervention placement and field edits",
                  fontsize=15, fontweight="bold", y=.985)
-    fig.text(.5, .962, "Thick numbered boxes match the surrounding zooms; faint centre-map "
-             "outlines show each complete selected member.", ha="center", fontsize=8.5)
-    fig.text(.5, .005, "Int2050 members nearest each intervention family's median footprint. "
-             "Surrounding panels show the primary edited field and its transect or cellwise distribution.",
+    fig.text(.5, .958, "Numbered boxes match the zooms. Field edits are drawn only inside their "
+             "boxes to preserve domain context.", ha="center", fontsize=8.5)
+    fig.text(.5, .012, "One Int2050 member nearest each family's median footprint. Zooms show the largest "
+             "contiguous primary-field feature; diagnostics show a DEM section or all edited-cell changes.",
              ha="center", fontsize=8)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
@@ -250,7 +269,7 @@ def build(ensemble, base, effect_csv, out, *, slr="slrInt2050", siting="targeted
     if not records:
         raise SystemExit("no representative members could be loaded")
     if layout == "hub":
-        return _build_hub(records, dem, out, siting)
+        return _build_hub(records, dem, out, siting, cell_m)
 
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 8,
                          "axes.spines.top": False, "axes.spines.right": False})
