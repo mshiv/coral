@@ -19,6 +19,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--manifest", required=True)
+    ap.add_argument("--selection-report", default=None,
+                    help="evaluate only member names listed in an existing split report")
     ap.add_argument("--out", required=True)
     ap.add_argument("--out-csv", default=None,
                     help="optional flat per-member metrics table")
@@ -36,6 +38,27 @@ def main():
     planned = json.loads(Path(a.manifest).read_text())
     if not isinstance(planned, list):
         raise ValueError(f"{a.manifest} must contain a JSON list")
+    if a.selection_report:
+        prior = json.loads(Path(a.selection_report).read_text())
+        blocks = []
+        if isinstance(prior, dict):
+            blocks.extend(prior.get(k) for k in ("holdout_metrics", "val_members", "held_out")
+                          if isinstance(prior.get(k), list))
+            for run in prior.get("runs", []):
+                if isinstance(run, dict):
+                    blocks.extend(run.get(k) for k in
+                                  ("holdout_metrics", "val_members", "held_out")
+                                  if isinstance(run.get(k), list))
+        names = {str(r["name"]) for block in blocks for r in block
+                 if isinstance(r, dict) and r.get("name")}
+        if not names:
+            raise ValueError(f"{a.selection_report} contains no per-member holdout names")
+        planned = [r for r in planned if str(r.get("name")) in names]
+        missing_names = names - {str(r.get("name")) for r in planned}
+        if missing_names:
+            raise ValueError(f"{len(missing_names)} selected names are absent from the manifest; "
+                             f"first: {sorted(missing_names)[:5]}")
+        print(f"selected {len(planned)} members from {a.selection_report}")
     samples = build_manifest(planned, skip_missing=True)
     missing = missing_runs(planned)
     if not samples:
@@ -72,6 +95,7 @@ def main():
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "checkpoint": str(Path(a.ckpt).resolve()),
         "manifest": str(Path(a.manifest).resolve()),
+        "selection_report": str(Path(a.selection_report).resolve()) if a.selection_report else None,
         "split": "external completed ensemble; no fitting",
         "threshold_m": a.threshold,
         "cell_m": a.cell_m,
