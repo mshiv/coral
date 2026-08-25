@@ -66,14 +66,18 @@ def audit(a):
     band = (np.isfinite(dem) & (dem >= a.mhw) & (dem <= a.mhw + a.slr) & focus)
     eligible = band & ~wet & ~developed & ~buildings
 
-    def score(focus_mask):
+    def score(focus_mask, *, legacy=False):
         return suitability_score(
             dem, "marsh_migration", sea_level=a.mhw + a.slr, wetlands=wet,
             buildings=buildings, classes=classes, focus=focus_mask, mhw=a.mhw,
-            mlw=a.mlw, slr_buffer=a.slr, res_m=a.cell_m)
-    reference_score = score(reference_focus)
-    n_fixed = max(1, round(a.area_frac * np.count_nonzero(reference_score > 0)))
-    production_fixed = _ranked(score(focus), n_fixed, a.seed)
+            mlw=a.mlw, slr_buffer=a.slr, res_m=a.cell_m,
+            exclude_existing_wetland=not legacy)
+    legacy_reference_score = score(reference_focus, legacy=True)
+    legacy_n_fixed = max(1, round(a.area_frac * np.count_nonzero(legacy_reference_score > 0)))
+    production_fixed_legacy = _ranked(score(focus, legacy=True), legacy_n_fixed, a.seed)
+    corrected_reference_score = score(reference_focus)
+    corrected_n_fixed = max(1, round(a.area_frac * np.count_nonzero(corrected_reference_score > 0)))
+    production_fixed_corrected = _ranked(score(focus), corrected_n_fixed, a.seed)
 
     distance = ndimage.distance_transform_edt(~wet) * a.cell_m
     proximity = eligible & (distance <= a.proximity_m)
@@ -105,7 +109,9 @@ def audit(a):
     recurrent = eligible & (recurrent_count >= required) if paths else np.zeros(dem.shape, bool)
 
     area = lambda m: float(m.sum() * a.cell_m ** 2 / 1e4)
-    masks = {"eligible": eligible, "production_fixed": production_fixed,
+    masks = {"eligible": eligible,
+             "production_fixed_legacy": production_fixed_legacy,
+             "production_fixed_corrected": production_fixed_corrected,
              "proximity": proximity,
              "barrier_connected": barrier_connected,
              "peak_envelope_connected": peak_connected,
@@ -122,11 +128,19 @@ def audit(a):
                                   for k, v in masks.items() if k != "eligible"},
         "pairwise_jaccard": {},
         "interpretation": {
+            "production_fixed_legacy": "reconstructs the ensemble siting rule before existing wetland was excluded",
+            "production_fixed_corrected": "same rank rule restricted to new migration land",
             "proximity": "Euclidean screening buffer; not hydraulic connectivity",
             "barrier_connected": "static low-elevation path to mapped wetland; no dynamics or culverts",
             "peak_envelope_connected": "connected union of maximum wet cells; cells may peak at different times",
             "recurrent_snapshot_connected": "simultaneously connected in the stated fraction of saved frames",
         },
+    }
+    report["production_composition_ha"] = {
+        "legacy_existing_wetland": area(production_fixed_legacy & wet),
+        "legacy_eligible_new_land": area(production_fixed_legacy & eligible),
+        "corrected_existing_wetland": area(production_fixed_corrected & wet),
+        "corrected_eligible_new_land": area(production_fixed_corrected & eligible),
     }
     keys = list(masks)
     for i, x in enumerate(keys):
@@ -154,9 +168,12 @@ def plot(dem, ex, masks, report, out):
                   cmap="Oranges", alpha=.22, vmin=0, vmax=1)
         ax.imshow(np.where(masks[key], 1, np.nan), extent=ex, origin="upper",
                   cmap="Blues", alpha=.72, vmin=0, vmax=1)
-        if masks["production_fixed"].any():
-            ax.contour(masks["production_fixed"].astype(float), levels=[.5],
+        if masks["production_fixed_legacy"].any():
+            ax.contour(masks["production_fixed_legacy"].astype(float), levels=[.5],
                        colors="#CC79A7", linewidths=1.0, extent=ex, origin="upper")
+        if masks["production_fixed_corrected"].any():
+            ax.contour(masks["production_fixed_corrected"].astype(float), levels=[.5],
+                       colors="#009E73", linewidths=1.0, extent=ex, origin="upper")
         area = report["areas_ha"][key]
         frac = 100 * report["fractions_of_eligible"][key]
         ax.set_title(f"({chr(97+i)}) {title}: {area:.1f} ha ({frac:.1f}%)",

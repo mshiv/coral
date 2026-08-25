@@ -37,7 +37,7 @@ def _norm(a):
 def suitability_score(dem, kind, *, sea_level=None, wetlands=None, buildings=None,
                       roads=None, flood_depth=None, flood_zone=None, classes=None,
                       soil_ksat=None, focus=None, mhw=None, mlw=None, slr_buffer=0.5,
-                      res_m=30.0):
+                      res_m=30.0, exclude_existing_wetland=True):
     """Per-cell suitability in [0,1] for `kind`; 0 outside its zone. Higher = better target.
 
     sea_level, mhw and mlw have no defaults on purpose. They previously defaulted to 0.81 and the
@@ -85,6 +85,11 @@ def suitability_score(dem, kind, *, sea_level=None, wetlands=None, buildings=Non
         if wetlands is not None and wetlands.any():
             dist = ndimage.distance_transform_edt(~wetlands)      # cells from existing marsh
             prox = 1.0 / (1.0 + dist)                             # nearer marsh = higher
+            # Migration acts on NEW upland.  Existing mapped marsh is restoration space.
+            # Before 2026-08-25 targeted members ranked existing marsh highest because
+            # proximity equals one there; random members correctly excluded it via DEM > MHW.
+            if exclude_existing_wetland:
+                band = band & ~wetlands
         else:
             prox = np.ones(dem.shape)
         low = _norm(-(dem))                                       # lower land preferred
