@@ -17,6 +17,7 @@ from scipy import ndimage
 from ..emulator.dataset import read_asc
 from ..interventions.context_rasters import buildings_mask, wetlands_mask
 from ..interventions.generate import focus_region
+from ..interventions.siting import suitability_score
 from ..preprocess.make_manning import classes_on_dem
 
 DEVELOPED = (21, 22, 23, 24)
@@ -40,6 +41,16 @@ def _hydraulic_mask(depth, wetland, dry):
     return _seeded_component(flooded | wetland, wetland) & flooded
 
 
+def _ranked(score, n, seed):
+    flat = score.ravel(); pos = np.flatnonzero(flat > 0)
+    out = np.zeros(flat.size, bool); n = min(int(n), pos.size)
+    if n:
+        rng = np.random.default_rng(seed)
+        order = np.lexsort((rng.random(pos.size), -flat[pos]))
+        out[pos[order[:n]]] = True
+    return out.reshape(score.shape)
+
+
 def audit(a):
     classes, dem = classes_on_dem(a.nlcd, a.dem)
     _, hdr = read_asc(a.dem)
@@ -51,8 +62,18 @@ def audit(a):
     ex = _extent(hdr)
     focus = (np.ones(dem.shape, bool) if a.radius_km <= 0 else
              focus_region(dem.shape, ex, a.ref_point, a.radius_km))
+    reference_focus = focus_region(dem.shape, ex, a.ref_point, a.reference_radius_km)
     band = (np.isfinite(dem) & (dem >= a.mhw) & (dem <= a.mhw + a.slr) & focus)
     eligible = band & ~wet & ~developed & ~buildings
+
+    def score(focus_mask):
+        return suitability_score(
+            dem, "marsh_migration", sea_level=a.mhw + a.slr, wetlands=wet,
+            buildings=buildings, classes=classes, focus=focus_mask, mhw=a.mhw,
+            mlw=a.mlw, slr_buffer=a.slr, res_m=a.cell_m)
+    reference_score = score(reference_focus)
+    n_fixed = max(1, round(a.area_frac * np.count_nonzero(reference_score > 0)))
+    production_fixed = _ranked(score(focus), n_fixed, a.seed)
 
     distance = ndimage.distance_transform_edt(~wet) * a.cell_m
     proximity = eligible & (distance <= a.proximity_m)
@@ -84,12 +105,14 @@ def audit(a):
     recurrent = eligible & (recurrent_count >= required) if paths else np.zeros(dem.shape, bool)
 
     area = lambda m: float(m.sum() * a.cell_m ** 2 / 1e4)
-    masks = {"eligible": eligible, "proximity": proximity,
+    masks = {"eligible": eligible, "production_fixed": production_fixed,
+             "proximity": proximity,
              "barrier_connected": barrier_connected,
              "peak_envelope_connected": peak_connected,
              "recurrent_snapshot_connected": recurrent}
     report = {
         "slr_m": a.slr, "radius_km": a.radius_km,
+        "reference_radius_km": a.reference_radius_km, "area_frac": a.area_frac,
         "proximity_m": a.proximity_m, "dry_threshold_m": a.dry_threshold,
         "developed_land_is_hard_barrier": a.developed_barrier,
         "snapshot_count": len(paths), "minimum_snapshot_fraction": a.min_snapshot_fraction,
@@ -131,6 +154,9 @@ def plot(dem, ex, masks, report, out):
                   cmap="Oranges", alpha=.22, vmin=0, vmax=1)
         ax.imshow(np.where(masks[key], 1, np.nan), extent=ex, origin="upper",
                   cmap="Blues", alpha=.72, vmin=0, vmax=1)
+        if masks["production_fixed"].any():
+            ax.contour(masks["production_fixed"].astype(float), levels=[.5],
+                       colors="#CC79A7", linewidths=1.0, extent=ex, origin="upper")
         area = report["areas_ha"][key]
         frac = 100 * report["fractions_of_eligible"][key]
         ax.set_title(f"({chr(97+i)}) {title}: {area:.1f} ha ({frac:.1f}%)",
@@ -151,6 +177,9 @@ def main():
     ap.add_argument("--cell-m", type=float, required=True)
     ap.add_argument("--ref-point", nargs=2, type=float, default=(-81.0903, 31.9522))
     ap.add_argument("--radius-km", type=float, default=3.0)
+    ap.add_argument("--reference-radius-km", type=float, default=3.0)
+    ap.add_argument("--area-frac", type=float, default=.15)
+    ap.add_argument("--seed", type=int, default=23)
     ap.add_argument("--proximity-m", type=float, default=300.0)
     ap.add_argument("--max-depth", help="LISFLOOD .max on the DEM grid")
     ap.add_argument("--snapshots", help="quoted glob for ordered LISFLOOD .wd grids")
