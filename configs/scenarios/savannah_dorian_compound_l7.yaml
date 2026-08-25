@@ -18,6 +18,8 @@ geoclaw:
 coupling:
   landfall_utc: "2019-09-04T12:00:00"
 forcing:
+  tide: noaa
+  tide_station: "8670870"
   rainfall: aorc
   rain_mode: uniform
   infiltration: polaris
