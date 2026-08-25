@@ -65,6 +65,7 @@ def run(a):
         mlw=a.mlw, slr_buffer=a.slr, res_m=a.cell_m) for r in radii}
     ref = min(radii, key=lambda r: abs((r if r is not None else 1e9) - a.reference_km))
     nref = max(1, round(a.area_frac * np.count_nonzero(scores[ref] > 0)))
+    reference_fixed = ranked(scores[ref], nref, a.seed)
     area_cell_ha = a.cell_m ** 2 / 1e4
     rows, masks = [], {}
     for r in radii:
@@ -72,8 +73,12 @@ def run(a):
         band = (np.isfinite(dem) & (dem >= a.mhw) & (dem <= a.mhw + a.slr) & focus)
         eligible = band & ~developed & ~buildings & ~wet
         connected = eligible & (dist_wet <= a.adjacency_m)
+        production_suitable = scores[r] > 0
         fractional = ranked(scores[r], round(a.area_frac * np.count_nonzero(scores[r] > 0)), a.seed)
         fixed = ranked(scores[r], nref, a.seed)
+        connected_fixed = ranked(np.where(connected, scores[r], 0), nref, a.seed)
+        union = np.count_nonzero(fixed | reference_fixed)
+        intersection = np.count_nonzero(fixed & reference_fixed)
         lab, ncomp = ndimage.label(connected, structure=np.ones((3, 3), int))
         sizes = np.bincount(lab.ravel())[1:] if ncomp else np.array([], int)
         rows.append({
@@ -82,13 +87,19 @@ def run(a):
             "eligible_new_land_ha": float(eligible.sum() * area_cell_ha),
             "connected_new_land_ha": float(connected.sum() * area_cell_ha),
             "connected_fraction": float(connected.sum() / max(eligible.sum(), 1)),
+            "production_suitable_ha": float(production_suitable.sum() * area_cell_ha),
             "fractional_selected_ha": float(fractional.sum() * area_cell_ha),
             "fixed_selected_ha": float(fixed.sum() * area_cell_ha),
             "fixed_requested_ha": float(nref * area_cell_ha),
+            "fixed_shortfall_ha": float((nref - fixed.sum()) * area_cell_ha),
+            "fixed_overlap_reference_ha": float(intersection * area_cell_ha),
+            "fixed_jaccard_reference": float(intersection / union) if union else 1.0,
+            "connected_fixed_selected_ha": float(connected_fixed.sum() * area_cell_ha),
+            "connected_fixed_shortfall_ha": float((nref - connected_fixed.sum()) * area_cell_ha),
             "connected_components": int(ncomp),
             "largest_connected_patch_ha": float(sizes.max() * area_cell_ha) if sizes.size else 0.0,
         })
-        masks[r] = (eligible, connected, fixed)
+        masks[r] = (eligible, connected, fixed, connected_fixed)
     return dem, ex, rows, masks, ref
 
 
@@ -101,15 +112,17 @@ def plot(dem, ex, rows, masks, out):
     x = np.arange(len(rows)); labels = [r["label"] for r in rows]
     ax[0].plot(x, [r["eligible_new_land_ha"] for r in rows], "o-", label="eligible new land")
     ax[0].plot(x, [r["connected_new_land_ha"] for r in rows], "o-", label="within adjacency")
-    ax[0].plot(x, [r["fractional_selected_ha"] for r in rows], "o--", label="15% of each radius")
-    ax[0].plot(x, [r["fixed_selected_ha"] for r in rows], "o--", label="fixed 3 km area")
+    ax[0].plot(x, [r["production_suitable_ha"] for r in rows], "o-", label="production-suitable")
+    ax[0].plot(x, [r["fixed_selected_ha"] for r in rows], "o--", label="production fixed area")
+    ax[0].plot(x, [r["connected_fixed_selected_ha"] for r in rows], "o--", label="connected fixed area")
     ax[0].set_xticks(x, labels); ax[0].set_ylabel("area (ha)")
+    ax[0].set_yscale("log")
     ax[0].set_title("(a) Opportunity and selection area", loc="left", fontweight="bold")
     ax[0].grid(alpha=.2); ax[0].legend(frameon=False, fontsize=7)
     shade = LightSource(315, 38).shade(np.nan_to_num(dem, nan=np.nanmedian(dem)),
                                       cmap=plt.cm.Greys, vert_exag=.3, blend_mode="soft")
     for i, row in enumerate(rows[:5], 1):
-        r = row["radius_km"]; eligible, connected, fixed = masks[r]
+        r = row["radius_km"]; eligible, connected, fixed, connected_fixed = masks[r]
         ax[i].imshow(shade, extent=ex, origin="upper")
         ax[i].imshow(np.where(eligible, 1, np.nan), extent=ex, origin="upper",
                      cmap="Oranges", alpha=.35, vmin=0, vmax=1)
@@ -117,13 +130,17 @@ def plot(dem, ex, rows, masks, out):
                      cmap="Greens", alpha=.50, vmin=0, vmax=1)
         ax[i].contour(fixed.astype(float), levels=[.5], colors="#CC79A7", linewidths=.8,
                       extent=ex, origin="upper")
+        if connected_fixed.any():
+            ax[i].contour(connected_fixed.astype(float), levels=[.5], colors="#0072B2",
+                          linewidths=.8, extent=ex, origin="upper")
         ax[i].set_title(f"({chr(97+i)}) {row['label']}: {row['eligible_new_land_ha']:.1f} ha eligible",
                         loc="left", fontsize=9, fontweight="bold")
         ax[i].set_xticks([]); ax[i].set_yticks([])
     fig.legend(handles=[Patch(fc="#E69F00", alpha=.35, label="eligible new land"),
                         Patch(fc="#009E73", alpha=.50, label="connected"),
-                        Patch(fc="none", ec="#CC79A7", label="fixed-area targeted selection")],
-               loc="lower center", ncol=3, frameon=False)
+                        Patch(fc="none", ec="#CC79A7", label="production fixed-area selection"),
+                        Patch(fc="none", ec="#0072B2", label="connectivity-gated fixed area")],
+               loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(.5, -.01))
     fig.suptitle("Marsh-migration opportunity versus community focus radius",
                  fontsize=14, fontweight="bold")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
@@ -152,10 +169,11 @@ def main():
     Path(a.out_json).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out_json).write_text(json.dumps(report, indent=2) + "\n")
     plot(dem, ex, rows, masks, a.out_fig)
-    print(f"{'radius':>12} {'eligible ha':>12} {'connected ha':>14} {'frac selected':>14} {'fixed selected':>14}")
+    print(f"{'radius':>12} {'eligible':>10} {'connected':>10} {'prod suit.':>11} {'fixed':>10} {'Jaccard':>9} {'conn fixed':>11}")
     for r in rows:
-        print(f"{r['label']:>12} {r['eligible_new_land_ha']:12.2f} {r['connected_new_land_ha']:14.2f} "
-              f"{r['fractional_selected_ha']:14.2f} {r['fixed_selected_ha']:14.2f}")
+        print(f"{r['label']:>12} {r['eligible_new_land_ha']:10.2f} {r['connected_new_land_ha']:10.2f} "
+              f"{r['production_suitable_ha']:11.2f} {r['fixed_selected_ha']:10.2f} "
+              f"{r['fixed_jaccard_reference']:9.3f} {r['connected_fixed_selected_ha']:11.2f}")
     print(f"wrote {a.out_json}\nwrote {a.out_fig}")
 
 
