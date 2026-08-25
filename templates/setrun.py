@@ -576,25 +576,36 @@ def setgeo(rundata):
 
     # Storm parameters - Parameterized storm (Holland 1980)
     data.storm_specification_type = 'holland80'  # (type 1)
+    # Keep the numerics, AMR ladder, topography and Savannah coupling geometry identical
+    # between storms.  The scenario changes only the event forcing and calendar anchor.
+    _storm_label = (_CFG.geoclaw.storm if _CFG else "matthew").lower()
+    _storms = {
+        "matthew": (2016, "bal142016.dat.gz", datetime.datetime(2016, 10, 8, 12)),
+        "dorian":  (2019, "bal052019.dat.gz", datetime.datetime(2019, 9, 4, 12)),
+    }
+    if _storm_label not in _storms:
+        raise ValueError("unsupported GeoClaw storm %r; add its ATCF archive and time offset"
+                         % _storm_label)
+    _storm_year, _atcf_name, _time_offset = _storms[_storm_label]
     data.storm_file = os.path.expandvars(os.path.join(os.getcwd(),
-                                                      'matthew.storm'))
+                                                      _storm_label + '.storm'))
 
     # Convert ATCF data to GeoClaw format
     clawutil.data.get_remote_file(
-        "https://ftp.nhc.noaa.gov/atcf/archive/2016/bal142016.dat.gz", scratch_dir)
-    atcf_path = os.path.join(scratch_dir, "bal142016.dat")
+        "https://ftp.nhc.noaa.gov/atcf/archive/%d/%s" % (_storm_year, _atcf_name),
+        scratch_dir)
+    atcf_path = os.path.join(scratch_dir, _atcf_name[:-3])
     # Note that the get_remote_file function does not support gzip files which
     # are not also tar files.  The following code handles this
     with gzip.open(".".join((atcf_path, 'gz')), 'rb') as atcf_file, \
             open(atcf_path, 'w') as atcf_unzipped_file:
         atcf_unzipped_file.write(atcf_file.read().decode('ascii'))
 
-    matthew = Storm(path=atcf_path, file_format="ATCF")
-
-    # Calculate landfall time - Need to specify as the file above does not include (10/8/2016 ~ 12 UTC)
-    matthew.time_offset = datetime.datetime(2016, 10, 8, 12)
-
-    matthew.write(data.storm_file, file_format='geoclaw')
+    storm = Storm(path=atcf_path, file_format="ATCF")
+    storm.time_offset = _time_offset
+    storm.write(data.storm_file, file_format='geoclaw')
+    print("setrun: %s ATCF %s, t=0 at %s UTC" %
+          (_storm_label, _atcf_name, _time_offset.isoformat()))
 
     # =======================
     #  Set Variable Friction

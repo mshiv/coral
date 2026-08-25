@@ -1,0 +1,24 @@
+# Event-matched AMR sensitivity: identical to savannah_dorian_compound except for a bounded
+# level-7 (~36 m) band along the coupling front.  Do not use this as the production boundary
+# unless the L6/L7 comparison shows a material change.
+name: savannah_dorian_compound_l7
+domain:
+  dem: data/raw/ga_cudem_30m.tif
+  bbox: [-81.22, -80.82, 31.70, 32.25]
+  res_m: 30
+  ref_point: [-81.0903, 31.9522]
+geoclaw:
+  storm: dorian
+  sea_level: 0.0
+  amr_max: 7
+  refine_box: [-81.150, -80.800, 31.680, 32.244]
+  refine_front_km: 1.5
+  refine_t1_h: -8.0
+  refine_t2_h: 20.0
+coupling:
+  landfall_utc: "2019-09-04T12:00:00"
+forcing:
+  rainfall: aorc
+  rain_mode: uniform
+  infiltration: polaris
+  infil_capped: true
