@@ -133,7 +133,77 @@ def _normal_section(component, arrays, half_width=75):
     return s, coords, values
 
 
-def build(ensemble, base, effect_csv, out, *, slr="slrInt2050", siting="targeted"):
+def _build_hub(records, dem, out, siting):
+    """Full-domain locator surrounded by seven linked primary-field zooms."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LightSource
+    from matplotlib.patches import ConnectionPatch
+
+    ls = LightSource(azdeg=315, altdeg=38)
+    bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
+                  vert_exag=.35, blend_mode="soft")
+    fig = plt.figure(figsize=(14, 10.5))
+    centre = fig.add_axes([.245, .205, .51, .62])
+    positions = [[.02, .70, .20, .22], [.02, .405, .20, .22], [.02, .11, .20, .22],
+                 [.78, .70, .20, .22], [.78, .405, .20, .22], [.78, .11, .20, .22],
+                 [.40, .015, .20, .16]]
+    centre.imshow(bg, interpolation="nearest")
+    centre.set_xticks([]); centre.set_yticks([])
+    centre.set_title("Full 4 m domain — complete primary-field footprints",
+                     fontsize=10, fontweight="bold")
+
+    for i, ((kind, name, area, rd, delta, mask), pos) in enumerate(zip(records, positions)):
+        primary = PRIMARY_FIELD[kind]
+        pmask = np.abs(delta[primary]) > TOL
+        component = _largest_component(pmask)
+        # Complete member is deliberately faint; the selected feature and label stay legible.
+        centre.contour(pmask.astype(float), levels=[.5], colors=[COLORS[kind]],
+                       linewidths=.55, alpha=.55)
+        rr, cc = np.where(component)
+        cr, ccol = rr.mean(), cc.mean()
+        centre.scatter([ccol], [cr], s=42, c=COLORS[kind], edgecolors="white",
+                       linewidths=.8, zorder=8)
+        centre.text(ccol, cr, str(i+1), ha="center", va="center", fontsize=6.5,
+                    fontweight="bold", color="white", zorder=9)
+
+        ax = fig.add_axes(pos)
+        sl = _crop(component, pad=35)
+        ax.imshow(bg[sl], interpolation="nearest")
+        local = component[sl]
+        if primary == "dem" and kind in ("floodwall", "road_raise"):
+            ax.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=2.2)
+            ax.contour(local.astype(float), levels=[.5], colors=[COLORS[kind]], linewidths=1.05)
+        else:
+            ax.contourf(local.astype(float), levels=[.5, 1.5], colors=[COLORS[kind]], alpha=.72)
+            ax.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=.65)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title(f"{i+1}  {LABELS[kind]}\n{area/1e4:.1f} ha member; {SHORT_FIELD[primary]}",
+                     fontsize=8, fontweight="bold", loc="left")
+        # Connector terminates at the nearest side of the zoom panel.
+        side = "right" if pos[0] < .24 else ("left" if pos[0] > .75 else "top")
+        xy_b = {"right": (1, .5), "left": (0, .5), "top": (.5, 1)}[side]
+        con = ConnectionPatch(xyA=(ccol, cr), coordsA=centre.transData,
+                              xyB=xy_b, coordsB=ax.transAxes, color=COLORS[kind],
+                              lw=.65, alpha=.55, zorder=1)
+        fig.add_artist(con)
+
+    fig.suptitle(f"Representative {siting} intervention placements",
+                 fontsize=15, fontweight="bold", y=.975)
+    fig.text(.5, .955, "Numbered zooms show the largest contiguous feature; faint centre-map "
+             "outlines show the complete selected member.", ha="center", fontsize=8.5)
+    fig.text(.5, .005, "Int2050 members nearest each intervention family's median footprint. "
+             "Placement figure only; field magnitudes and transects are reported separately.",
+             ha="center", fontsize=8)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
+    fig.savefig(Path(out).with_suffix(".pdf"), bbox_inches="tight", facecolor="white")
+    print(f"wrote {out} and {Path(out).with_suffix('.pdf')}")
+
+
+def build(ensemble, base, effect_csv, out, *, slr="slrInt2050", siting="targeted",
+          layout="cards"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -159,6 +229,8 @@ def build(ensemble, base, effect_csv, out, *, slr="slrInt2050", siting="targeted
         records.append((kind, name, area, rd, delta, mask))
     if not records:
         raise SystemExit("no representative members could be loaded")
+    if layout == "hub":
+        return _build_hub(records, dem, out, siting)
 
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 8,
                          "axes.spines.top": False, "axes.spines.right": False})
@@ -247,9 +319,11 @@ def main():
     ap.add_argument("--effect-csv", required=True)
     ap.add_argument("--slr", default="slrInt2050")
     ap.add_argument("--siting", default="targeted")
+    ap.add_argument("--layout", choices=["cards", "hub"], default="cards")
     ap.add_argument("--out", default="reports/figures/intervention_anatomy.png")
     a = ap.parse_args()
-    build(a.ensemble, a.base, a.effect_csv, a.out, slr=a.slr, siting=a.siting)
+    build(a.ensemble, a.base, a.effect_csv, a.out, slr=a.slr, siting=a.siting,
+          layout=a.layout)
 
 
 if __name__ == "__main__":
