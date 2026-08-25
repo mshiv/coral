@@ -127,28 +127,31 @@ def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3,
     ax[1].set_title("B  What the child grid would see", fontsize=11, color=PALETTE["text"])
     ax[1].grid(alpha=0.25)
 
-    # --- C. series at the gauges that differ most -------------------------------------------
-    worst = st[np.argsort(-np.abs(st["dpeak"]))][:n_show]
-    for k, r in enumerate(worst):
-        gid = int(r["gid"])
-        _, tc, ec = coup_c[gid]
-        _, tf, ef = coup_f[gid]
-        off = k * 0.6
-        ax[2].plot(tc / 3600.0, ec + off, lw=1.5, color=PALETTE["muted"],
-                   label=labels[0] if k == 0 else None)
-        ax[2].plot(tf / 3600.0, ef + off, lw=1.1, color=PALETTE["flood"],
-                   label=labels[1] if k == 0 else None)
-        ax[2].text(tc.min() / 3600.0, off + 0.08,
-                   f"gauge {gid}, lat {r['lat']:.3f}, dpeak {r['dpeak']:+.3f} m",
-                   fontsize=7.5, color=PALETTE["text"])
-    ax[2].axvline(0, color=PALETTE["intervention"], lw=1.0, ls="--")
-    if window:
-        ax[2].axvspan(window[0], window[1], color=PALETTE["flood"], alpha=0.07, lw=0)
-    ax[2].set_xlabel("hours from landfall", fontsize=9)
-    ax[2].set_ylabel("eta (m), series offset for clarity", fontsize=9)
-    ax[2].set_title(f"C  The {n_show} gauges that disagree most", fontsize=11,
+    # --- C. distribution, not selected time series -----------------------------------------
+    # Previously this panel showed the gauges with the largest peak discrepancy.  Those
+    # traces over-emphasised one-step wet/dry and AMR-switch transients and looked like
+    # physical oscillations.  The child consumes the whole front, so the distribution of
+    # gauge errors is both more robust and the scientifically relevant summary.
+    x = np.sort(np.abs(st["dpeak"]))
+    y = np.arange(1, len(x) + 1) / len(x)
+    ax[2].step(x, y, where="post", lw=1.8, color=PALETTE["flood"])
+    med, p90 = np.median(x), np.percentile(x, 90)
+    ax[2].axvline(med, color=PALETTE["muted"], lw=1.0, ls="--",
+                  label=f"median {med:.3f} m")
+    ax[2].axvline(p90, color=PALETTE["intervention"], lw=1.0, ls=":",
+                  label=f"90th percentile {p90:.3f} m")
+    for threshold in (0.05, 0.10):
+        frac = 100 * np.mean(x > threshold)
+        ax[2].plot([threshold], [np.searchsorted(x, threshold, side="right") / len(x)],
+                   marker="o", ms=4, color=PALETTE["text"])
+        ax[2].text(threshold, .06, f"{frac:.0f}% > {threshold:.2f} m",
+                   rotation=90, va="bottom", ha="right", fontsize=7)
+    ax[2].set_xlabel(r"absolute peak difference $|\Delta\eta_{peak}|$ (m)", fontsize=9)
+    ax[2].set_ylabel("fraction of coupling gauges", fontsize=9)
+    ax[2].set_ylim(0, 1.02)
+    ax[2].set_title("C  Error distribution across the front", fontsize=11,
                     color=PALETTE["text"])
-    ax[2].legend(fontsize=8, frameon=False, loc="upper left")
+    ax[2].legend(fontsize=8, frameon=False, loc="lower right")
     ax[2].grid(alpha=0.25)
 
     for a in ax:
