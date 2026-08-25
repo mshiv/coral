@@ -107,6 +107,22 @@ def _crop(mask, pad=30):
             slice(max(0, c.min()-pad), min(mask.shape[1], c.max()+pad+1)))
 
 
+def _fixed_crop(mask, half_width=80):
+    """Return an equal-size comparison window centred on an edited component."""
+    r, c = np.where(mask)
+    if not len(r):
+        raise ValueError("cannot crop an empty mask")
+    nr, nc = mask.shape
+    size = min(2 * half_width + 1, nr, nc)
+
+    def bounds(mid, limit):
+        lo = int(round(mid)) - size // 2
+        lo = max(0, min(lo, limit - size))
+        return slice(lo, lo + size)
+
+    return bounds(r.mean(), nr), bounds(c.mean(), nc)
+
+
 def _largest_component(mask):
     from scipy import ndimage
     lab, n = ndimage.label(mask, structure=np.ones((3, 3), int))
@@ -134,7 +150,7 @@ def _normal_section(component, arrays, half_width=75):
 
 
 def _build_hub(records, dem, out, siting, cell_m):
-    """Top-left domain locator with mechanism cards along its right and lower edges."""
+    """Regular publication grid with a large locator and seven equal-size cards."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -144,29 +160,25 @@ def _build_hub(records, dem, out, siting, cell_m):
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    fig = plt.figure(figsize=(18, 12))
-    centre = fig.add_axes([.035, .415, .59, .49])
-    # Three compact cards beside the domain and four deeper cards below it.
-    # ``side`` cards place map and diagnostic side by side; ``bottom`` cards stack them.
-    positions = [
-        (.65, .748, .325, .157, "side"),
-        (.65, .576, .325, .157, "side"),
-        (.65, .404, .325, .157, "side"),
-        (.035, .055, .218, .300, "bottom"),
-        (.272, .055, .218, .300, "bottom"),
-        (.509, .055, .218, .300, "bottom"),
-        (.746, .055, .218, .300, "bottom"),
-    ]
+    fig = plt.figure(figsize=(16, 11.8))
+    outer = fig.add_gridspec(3, 4, left=.035, right=.985, bottom=.065, top=.91,
+                             hspace=.31, wspace=.22)
+    centre = fig.add_subplot(outer[:2, :2])
+    card_slots = [(0, 2), (0, 3), (1, 2), (1, 3),
+                  (2, 0), (2, 1), (2, 2)]
     centre.imshow(bg, interpolation="nearest")
     centre.set_xticks([]); centre.set_yticks([])
-    centre.set_title("Full 4 m domain — representative edits within numbered zoom boxes",
-                     fontsize=10, fontweight="bold")
+    centre.set_title("(a) Full 4 m domain and equal-area comparison windows",
+                     fontsize=10, fontweight="bold", loc="left")
 
-    for i, ((kind, name, area, rd, delta, mask), pos) in enumerate(zip(records, positions)):
+    for i, ((kind, name, area, rd, delta, mask), slot) in enumerate(zip(records, card_slots)):
+        letter = chr(ord("b") + i)
         primary = PRIMARY_FIELD[kind]
         pmask = np.abs(delta[primary]) > TOL
         component = _largest_component(pmask)
-        sl = _crop(component, pad=35)
+        # A common 161-cell window (about 644 m at 4 m resolution) makes spatial
+        # textures comparable and avoids allowing broad masks to dictate panel shape.
+        sl = _fixed_crop(component, half_width=80)
         r0, r1, c0, c1 = sl[0].start, sl[0].stop, sl[1].start, sl[1].stop
         # Do not paint distributed masks over the whole domain.  Show the actual member
         # edits only inside the matching locator box; the zoom then resolves one feature.
@@ -180,17 +192,14 @@ def _build_hub(records, dem, out, siting, cell_m):
                             colors=[COLORS[kind]], alpha=.46)
         centre.add_patch(Rectangle((c0, r0), c1-c0, r1-r0, fill=False,
                                    ec=COLORS[kind], lw=2.8, zorder=8))
-        centre.text(c0+5, r0+5, str(i+1), ha="left", va="top", fontsize=7.5,
+        centre.text(c0+5, r0+5, letter, ha="left", va="top", fontsize=8,
                     fontweight="bold", color="white", zorder=9,
                     bbox=dict(boxstyle="round,pad=.20", fc=COLORS[kind], ec="white", lw=.6))
 
-        x, y, w, h, card_layout = pos
-        if card_layout == "side":
-            ax = fig.add_axes([x, y, .49*w, h])
-            metric = fig.add_axes([x + .57*w, y + .12*h, .41*w, .69*h])
-        else:
-            ax = fig.add_axes([x, y + .43*h, w, .53*h])
-            metric = fig.add_axes([x + .04*w, y + .04*h, .92*w, .29*h])
+        card = outer[slot[0], slot[1]].subgridspec(
+            2, 1, height_ratios=[1.42, 1], hspace=.24)
+        ax = fig.add_subplot(card[0])
+        metric = fig.add_subplot(card[1])
         ax.imshow(bg[sl], interpolation="nearest")
         local = component[sl]
         if primary == "dem" and kind in ("floodwall", "road_raise"):
@@ -200,8 +209,9 @@ def _build_hub(records, dem, out, siting, cell_m):
             ax.contourf(local.astype(float), levels=[.5, 1.5], colors=[COLORS[kind]], alpha=.72)
             ax.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=.65)
         ax.set_xticks([]); ax.set_yticks([])
-        ax.set_title(f"{i+1}  {LABELS[kind]}\n{area/1e4:.1f} ha; {SHORT_FIELD[primary]}",
-                     fontsize=7.5, fontweight="bold", loc="left", pad=2)
+        ax.set_title(f"({letter}) {LABELS[kind]} — {area/1e4:.1f} ha member\n"
+                     f"local {SHORT_FIELD[primary]} edit",
+                     fontsize=7.7, fontweight="bold", loc="left", pad=2)
         for spine in ax.spines.values():
             spine.set_linewidth(1.5); spine.set_edgecolor(COLORS[kind])
 
@@ -228,9 +238,22 @@ def _build_hub(records, dem, out, siting, cell_m):
         metric.tick_params(labelsize=5.6, pad=1)
         metric.grid(alpha=.14)
 
+    key = fig.add_subplot(outer[2, 3]); key.axis("off")
+    key.text(0, 1, "How to read the panels", va="top", fontweight="bold", fontsize=9)
+    key.text(0, .83,
+             "Panel (a): equal-size local windows\n"
+             "located in the complete 4 m domain.\n\n"
+             "Panels (b–h): the same windows at\n"
+             "a common map scale. Dashed sections\n"
+             "correspond to DEM profiles; histograms\n"
+             "summarize all edited cells in the member.\n\n"
+             "The mapped window is local; hectares\n"
+             "refer to the complete selected member.",
+             va="top", fontsize=7.7, linespacing=1.35)
+
     fig.suptitle(f"Representative {siting} intervention placement and field edits",
                  fontsize=15, fontweight="bold", y=.985)
-    fig.text(.5, .958, "Numbered boxes match the zooms. Field edits are drawn only inside their "
+    fig.text(.5, .958, "Lettered boxes match the zooms. Field edits are drawn only inside their "
              "boxes to preserve domain context.", ha="center", fontsize=8.5)
     fig.text(.5, .012, "One Int2050 member nearest each family's median footprint. Zooms show the largest "
              "contiguous primary-field feature; diagnostics show a DEM section or all edited-cell changes.",
