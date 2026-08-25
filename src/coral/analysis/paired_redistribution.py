@@ -70,6 +70,27 @@ def main():
     better = wet & (delta < -a.tol_m)
     worse = wet & (delta > a.tol_m)
     area = a.cell_m ** 2
+
+    def threshold_metrics(tol):
+        good = wet & (delta < -tol)
+        bad = wet & (delta > tol)
+        return {"threshold_m": float(tol),
+                "improved_cells": int(good.sum()), "worsened_cells": int(bad.sum()),
+                "improved_fraction": float(good.sum() / max(wet.sum(), 1)),
+                "worsened_fraction": float(bad.sum() / max(wet.sum(), 1)),
+                "benefit_m3": float((-delta[good]).sum() * area),
+                "adverse_m3": float(delta[bad].sum() * area)}
+
+    sensitivities = [threshold_metrics(t) for t in (.005, .01, .02, .05, .10)]
+    control_wet = land & (c > a.wet_m)
+    control_depth = c[control_wet]
+    baseline_stats = {"wet_threshold_m": float(a.wet_m),
+                      "wet_cells": int(control_wet.sum())}
+    if control_depth.size:
+        baseline_stats.update({"median_m": float(np.median(control_depth)),
+                               "p90_m": float(np.percentile(control_depth, 90)),
+                               "p95_m": float(np.percentile(control_depth, 95)),
+                               "max_m": float(control_depth.max())})
     bins = np.asarray([0, .1, .25, .5, 1, 2, 5, np.inf])
     radial = []
     for lo, hi in zip(bins[:-1], bins[1:]):
@@ -87,6 +108,8 @@ def main():
               "adverse_m3": float(delta[worse].sum() * area),
               "depth_tolerance_m": float(a.tol_m),
               "field_tolerance": float(a.field_tol),
+              "baseline_control_depth": baseline_stats,
+              "threshold_sensitivity": sensitivities,
               "max_reduction_m": float(-np.nanmin(delta)),
               "max_increase_m": float(np.nanmax(delta)), "distance_bins": radial}
     outj = Path(a.out_json); outj.parent.mkdir(parents=True, exist_ok=True)
@@ -107,9 +130,11 @@ def main():
     material = wet & (np.abs(delta) >= a.tol_m)
     v = np.nanpercentile(np.abs(delta[material]), 99) if material.any() else a.tol_m
     display = np.where(material, delta, np.nan)
+    ax[2].imshow(np.where(footprint[sl], 1.0, np.nan), cmap="Greys",
+                 vmin=0, vmax=1, alpha=.16)
     im = ax[2].imshow(display[sl], cmap="RdBu_r", vmin=-v, vmax=v)
-    ax[2].contour(footprint[sl], levels=[.5], colors="black", linewidths=.6)
-    ax[2].set_title(f"Material depth change (|Δh| ≥ {a.tol_m:g} m)"); ax[2].set_axis_off()
+    ax[2].set_title(f"Material depth change (|Δh| ≥ {a.tol_m:g} m)\n"
+                    "faint gray = edited input footprint"); ax[2].set_axis_off()
     fig.colorbar(im, ax=ax[2], shrink=.75, label="m")
     labels = [f"{r['lo_km']:g}–{r['hi_km']:g}" if r['hi_km'] is not None
               else f">{r['lo_km']:g}" for r in radial]
