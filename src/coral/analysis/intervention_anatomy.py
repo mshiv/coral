@@ -160,7 +160,7 @@ def _build_hub(records, dem, out, siting, cell_m):
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    fig = plt.figure(figsize=(18, 12))
+    fig = plt.figure(figsize=(21, 12.5))
     # The seven cards occupy equal grid cells: four beside the domain and three below.
     # Each card is itself a horizontal map--diagnostic pair.
     outer = fig.add_gridspec(5, 3, left=.035, right=.985, bottom=.065, top=.91,
@@ -199,9 +199,10 @@ def _build_hub(records, dem, out, siting, cell_m):
                     bbox=dict(boxstyle="round,pad=.20", fc=COLORS[kind], ec="white", lw=.6))
 
         card = outer[slot[0], slot[1]].subgridspec(
-            1, 2, width_ratios=[1, 1.08], wspace=.34)
+            1, 2, width_ratios=[1, 1.65], wspace=.28)
         ax = fig.add_subplot(card[0, 0])
         metric = fig.add_subplot(card[0, 1])
+        ax.set_box_aspect(1)
         ax.imshow(bg[sl], interpolation="nearest")
         local = component[sl]
         if primary == "dem" and kind in ("floodwall", "road_raise"):
