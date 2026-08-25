@@ -16,6 +16,10 @@ geoclaw:
 coupling:
   # Matches the GeoClaw Dorian reference used by the surge-examples case.
   landfall_utc: "2019-09-04T12:00:00"
+  # Do not inherit Matthew's event-calibrated +0.39 m antecedent setup. The Dorian NOAA
+  # comparison has station-dependent 11.5--18+ h lags and spatially varying residuals, so no
+  # defensible scalar correction is presently identified. This remains an uncalibrated transfer.
+  mean_offset_m: 0.0
 forcing:
   tide: noaa
   tide_station: "8670870"
