@@ -160,12 +160,14 @@ def _build_hub(records, dem, out, siting, cell_m):
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    fig = plt.figure(figsize=(16, 11.8))
-    outer = fig.add_gridspec(3, 4, left=.035, right=.985, bottom=.065, top=.91,
-                             hspace=.31, wspace=.22)
-    centre = fig.add_subplot(outer[:2, :2])
-    card_slots = [(0, 2), (0, 3), (1, 2), (1, 3),
-                  (2, 0), (2, 1), (2, 2)]
+    fig = plt.figure(figsize=(18, 12))
+    # The seven cards occupy equal grid cells: four beside the domain and three below.
+    # Each card is itself a horizontal map--diagnostic pair.
+    outer = fig.add_gridspec(5, 3, left=.035, right=.985, bottom=.065, top=.91,
+                             hspace=.34, wspace=.22)
+    centre = fig.add_subplot(outer[:4, :2])
+    card_slots = [(0, 2), (1, 2), (2, 2), (3, 2),
+                  (4, 0), (4, 1), (4, 2)]
     centre.imshow(bg, interpolation="nearest")
     centre.set_xticks([]); centre.set_yticks([])
     centre.set_title("(a) Full 4 m domain and equal-area comparison windows",
@@ -197,9 +199,9 @@ def _build_hub(records, dem, out, siting, cell_m):
                     bbox=dict(boxstyle="round,pad=.20", fc=COLORS[kind], ec="white", lw=.6))
 
         card = outer[slot[0], slot[1]].subgridspec(
-            2, 1, height_ratios=[1.42, 1], hspace=.24)
-        ax = fig.add_subplot(card[0])
-        metric = fig.add_subplot(card[1])
+            1, 2, width_ratios=[1, 1.08], wspace=.34)
+        ax = fig.add_subplot(card[0, 0])
+        metric = fig.add_subplot(card[0, 1])
         ax.imshow(bg[sl], interpolation="nearest")
         local = component[sl]
         if primary == "dem" and kind in ("floodwall", "road_raise"):
@@ -227,29 +229,17 @@ def _build_hub(records, dem, out, siting, cell_m):
             ax.plot(coords[1]-c0, coords[0]-r0, color="white", lw=1.0, ls="--")
         else:
             vals = delta[primary][pmask]
-            metric.hist(vals, bins=20, color=COLORS[kind], alpha=.82,
+            weights = np.full(vals.shape, 100.0 / len(vals))
+            metric.hist(vals, bins=20, weights=weights, color=COLORS[kind], alpha=.82,
                         edgecolor="white", lw=.25)
             med, lo, hi = np.median(vals), np.percentile(vals, 5), np.percentile(vals, 95)
             metric.axvline(med, color="#111111", lw=.9, ls="--")
             metric.text(.98, .94, f"median {med:+.3f}\n5–95% {lo:+.3f} to {hi:+.3f}",
                         transform=metric.transAxes, ha="right", va="top", fontsize=5.4)
             metric.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=6.1, labelpad=1)
-            metric.set_ylabel("cells", fontsize=6.1, labelpad=1)
+            metric.set_ylabel("edited cells (%)", fontsize=6.1, labelpad=1)
         metric.tick_params(labelsize=5.6, pad=1)
         metric.grid(alpha=.14)
-
-    key = fig.add_subplot(outer[2, 3]); key.axis("off")
-    key.text(0, 1, "How to read the panels", va="top", fontweight="bold", fontsize=9)
-    key.text(0, .83,
-             "Panel (a): equal-size local windows\n"
-             "located in the complete 4 m domain.\n\n"
-             "Panels (b–h): the same windows at\n"
-             "a common map scale. Dashed sections\n"
-             "correspond to DEM profiles; histograms\n"
-             "summarize all edited cells in the member.\n\n"
-             "The mapped window is local; hectares\n"
-             "refer to the complete selected member.",
-             va="top", fontsize=7.7, linespacing=1.35)
 
     fig.suptitle(f"Representative {siting} intervention placement and field edits",
                  fontsize=15, fontweight="bold", y=.985)
