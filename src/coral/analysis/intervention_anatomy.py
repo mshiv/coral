@@ -134,21 +134,21 @@ def _normal_section(component, arrays, half_width=75):
 
 
 def _build_hub(records, dem, out, siting):
-    """Full-domain locator surrounded by seven linked primary-field zooms."""
+    """Full-domain locator surrounded by seven zoom + mechanism cards."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.colors import LightSource
-    from matplotlib.patches import ConnectionPatch
+    from matplotlib.patches import Rectangle
 
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    fig = plt.figure(figsize=(14, 10.5))
-    centre = fig.add_axes([.245, .205, .51, .62])
-    positions = [[.02, .70, .20, .22], [.02, .405, .20, .22], [.02, .11, .20, .22],
-                 [.78, .70, .20, .22], [.78, .405, .20, .22], [.78, .11, .20, .22],
-                 [.40, .015, .20, .16]]
+    fig = plt.figure(figsize=(15, 12.5))
+    centre = fig.add_axes([.245, .29, .51, .53])
+    positions = [[.015, .675, .21, .275], [.015, .355, .21, .275], [.015, .035, .21, .275],
+                 [.775, .675, .21, .275], [.775, .355, .21, .275], [.775, .035, .21, .275],
+                 [.395, .015, .21, .245]]
     centre.imshow(bg, interpolation="nearest")
     centre.set_xticks([]); centre.set_yticks([])
     centre.set_title("Full 4 m domain — complete primary-field footprints",
@@ -158,18 +158,19 @@ def _build_hub(records, dem, out, siting):
         primary = PRIMARY_FIELD[kind]
         pmask = np.abs(delta[primary]) > TOL
         component = _largest_component(pmask)
-        # Complete member is deliberately faint; the selected feature and label stay legible.
+        # Complete member is deliberately faint; the selected feature and box stay legible.
         centre.contour(pmask.astype(float), levels=[.5], colors=[COLORS[kind]],
                        linewidths=.55, alpha=.55)
-        rr, cc = np.where(component)
-        cr, ccol = rr.mean(), cc.mean()
-        centre.scatter([ccol], [cr], s=42, c=COLORS[kind], edgecolors="white",
-                       linewidths=.8, zorder=8)
-        centre.text(ccol, cr, str(i+1), ha="center", va="center", fontsize=6.5,
-                    fontweight="bold", color="white", zorder=9)
-
-        ax = fig.add_axes(pos)
         sl = _crop(component, pad=35)
+        r0, r1, c0, c1 = sl[0].start, sl[0].stop, sl[1].start, sl[1].stop
+        centre.add_patch(Rectangle((c0, r0), c1-c0, r1-r0, fill=False,
+                                   ec=COLORS[kind], lw=2.1, zorder=8))
+        centre.text(c0+5, r0+5, str(i+1), ha="left", va="top", fontsize=7.5,
+                    fontweight="bold", color="white", zorder=9,
+                    bbox=dict(boxstyle="round,pad=.20", fc=COLORS[kind], ec="white", lw=.6))
+
+        x, y, w, h = pos
+        ax = fig.add_axes([x, y + .40*h, w, .56*h])
         ax.imshow(bg[sl], interpolation="nearest")
         local = component[sl]
         if primary == "dem" and kind in ("floodwall", "road_raise"):
@@ -181,20 +182,39 @@ def _build_hub(records, dem, out, siting):
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_title(f"{i+1}  {LABELS[kind]}\n{area/1e4:.1f} ha member; {SHORT_FIELD[primary]}",
                      fontsize=8, fontweight="bold", loc="left")
-        # Connector terminates at the nearest side of the zoom panel.
-        side = "right" if pos[0] < .24 else ("left" if pos[0] > .75 else "top")
-        xy_b = {"right": (1, .5), "left": (0, .5), "top": (.5, 1)}[side]
-        con = ConnectionPatch(xyA=(ccol, cr), coordsA=centre.transData,
-                              xyB=xy_b, coordsB=ax.transAxes, color=COLORS[kind],
-                              lw=.65, alpha=.55, zorder=1)
-        fig.add_artist(con)
+        for spine in ax.spines.values():
+            spine.set_linewidth(1.5); spine.set_edgecolor(COLORS[kind])
 
-    fig.suptitle(f"Representative {siting} intervention placements",
-                 fontsize=15, fontweight="bold", y=.975)
-    fig.text(.5, .955, "Numbered zooms show the largest contiguous feature; faint centre-map "
-             "outlines show the complete selected member.", ha="center", fontsize=8.5)
+        metric = fig.add_axes([x, y, w, .31*h])
+        if "dem" in delta:
+            s, coords, vals = _normal_section(component, {"z": dem, "dz": delta["dem"]})
+            xx = s * 4.0
+            metric.plot(xx, vals["z"], color="#777777", lw=1.1, label="before")
+            metric.plot(xx, vals["z"] + vals["dz"], color=COLORS[kind], lw=1.05,
+                        label="after")
+            metric.set_xlabel("distance normal to feature (m)", fontsize=6.3)
+            metric.set_ylabel("elevation (m)", fontsize=6.3)
+            metric.legend(fontsize=5.5, frameon=False, ncol=2, loc="best")
+            ax.plot(coords[1]-c0, coords[0]-r0, color="white", lw=1.0, ls="--")
+        else:
+            vals = delta[primary][pmask]
+            metric.hist(vals, bins=20, color=COLORS[kind], alpha=.82,
+                        edgecolor="white", lw=.25)
+            med, lo, hi = np.median(vals), np.percentile(vals, 5), np.percentile(vals, 95)
+            metric.axvline(med, color="#111111", lw=.9, ls="--")
+            metric.text(.98, .94, f"median {med:+.3f}\n5–95% {lo:+.3f} to {hi:+.3f}",
+                        transform=metric.transAxes, ha="right", va="top", fontsize=5.4)
+            metric.set_xlabel(f"change in {SHORT_FIELD[primary]}", fontsize=6.3)
+            metric.set_ylabel("cells", fontsize=6.3)
+        metric.tick_params(labelsize=5.7)
+        metric.grid(alpha=.14)
+
+    fig.suptitle(f"Representative {siting} intervention placement and field edits",
+                 fontsize=15, fontweight="bold", y=.985)
+    fig.text(.5, .962, "Thick numbered boxes match the surrounding zooms; faint centre-map "
+             "outlines show each complete selected member.", ha="center", fontsize=8.5)
     fig.text(.5, .005, "Int2050 members nearest each intervention family's median footprint. "
-             "Placement figure only; field magnitudes and transects are reported separately.",
+             "Surrounding panels show the primary edited field and its transect or cellwise distribution.",
              ha="center", fontsize=8)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
