@@ -88,7 +88,7 @@ def best_lag(t_mod, y_mod, t_obs, y_obs, max_lag_h=6.0, step_min=10):
 
 def build(run_dirs, out, *, labels=None, scenario=None, landfall_utc=None,
           datum_offset=0.0, ids=None, begin="20161005", end="20161012",
-          baseline_window_h=(-24.0, -6.0), out_json=None):
+          baseline_window_h=(-24.0, -6.0), max_lag_h=6.0, out_json=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -132,7 +132,7 @@ def build(run_dirs, out, *, labels=None, scenario=None, landfall_utc=None,
             if to is not None:
                 tos = (to - t0) / np.timedelta64(1, "s")
                 tos = tos.astype(float)
-                L, r = best_lag(tm, eta, tos, so)
+                L, r = best_lag(tm, eta, tos, so, max_lag_h=max_lag_h)
                 lo, hi = max(tm.min(), tos.min()), min(tm.max(), tos.max())
                 grid = np.arange(lo, hi, 600.0)
                 mod = np.interp(grid, tm, eta)
@@ -144,8 +144,8 @@ def build(run_dirs, out, *, labels=None, scenario=None, landfall_utc=None,
                 # added to the boundary. It is diagnostic, not automatically a calibration.
                 setup = float(np.mean(obs[bm] - mod[bm])) if bm.any() else np.nan
                 lag_table[lab].append(dict(station=name, lag_h=L, rmse_m=r,
-                                           model_peak_m=float(eta.max()),
-                                           observed_peak_m=float(so.max()),
+                                           model_peak_m=float(mod.max()),
+                                           observed_peak_m=float(obs.max()),
                                            model_minus_observed_bias_m=bias,
                                            prestorm_observed_minus_model_m=setup))
 
@@ -172,7 +172,8 @@ def build(run_dirs, out, *, labels=None, scenario=None, landfall_utc=None,
     if out_json:
         report = {"scenario": scenario, "landfall_utc": landfall_utc,
                   "begin": begin, "end": end,
-                  "prestorm_window_h": list(baseline_window_h), "runs": lag_table}
+                  "prestorm_window_h": list(baseline_window_h),
+                  "max_lag_h": max_lag_h, "runs": lag_table}
         Path(out_json).parent.mkdir(parents=True, exist_ok=True)
         Path(out_json).write_text(json.dumps(report, indent=2) + "\n")
         print(f"wrote {out_json}")
@@ -202,13 +203,14 @@ def main():
     ap.add_argument("--begin", default="20161005")
     ap.add_argument("--end", default="20161012")
     ap.add_argument("--prestorm-window-h", nargs=2, type=float, default=(-24.0, -6.0))
+    ap.add_argument("--max-lag-h", type=float, default=6.0)
     ap.add_argument("--out-json", default=None)
     ap.add_argument("--out", default="reports/figures/noaa_surge_validation.png")
     a = ap.parse_args()
     build(a.runs, a.out, labels=a.labels, scenario=a.scenario,
           landfall_utc=a.landfall_utc, datum_offset=a.datum_offset, ids=a.ids,
           begin=a.begin, end=a.end, baseline_window_h=tuple(a.prestorm_window_h),
-          out_json=a.out_json)
+          max_lag_h=a.max_lag_h, out_json=a.out_json)
 
 
 if __name__ == "__main__":
