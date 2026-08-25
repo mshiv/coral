@@ -160,11 +160,14 @@ def _build_hub(records, dem, out, siting, cell_m):
     ls = LightSource(azdeg=315, altdeg=38)
     bg = ls.shade(np.nan_to_num(dem, nan=np.nanmedian(dem)), cmap=plt.cm.Greys,
                   vert_exag=.35, blend_mode="soft")
-    fig = plt.figure(figsize=(21, 12.5))
+    # The canvas ratio is chosen so the 4x2 locator allocation matches the native
+    # raster aspect.  This keeps geography undistorted while aligning its visible
+    # left/right edges with the two cards directly below.
+    fig = plt.figure(figsize=(21, 16.8))
     # The seven cards occupy equal grid cells: four beside the domain and three below.
     # Each card is itself a horizontal map--diagnostic pair.
-    outer = fig.add_gridspec(5, 3, left=.035, right=.985, bottom=.065, top=.91,
-                             hspace=.34, wspace=.22)
+    outer = fig.add_gridspec(5, 3, left=.035, right=.985, bottom=.055, top=.925,
+                             hspace=.22, wspace=.10)
     centre = fig.add_subplot(outer[:4, :2])
     card_slots = [(0, 2), (1, 2), (2, 2), (3, 2),
                   (4, 0), (4, 1), (4, 2)]
@@ -199,7 +202,7 @@ def _build_hub(records, dem, out, siting, cell_m):
                     bbox=dict(boxstyle="round,pad=.20", fc=COLORS[kind], ec="white", lw=.6))
 
         card = outer[slot[0], slot[1]].subgridspec(
-            1, 2, width_ratios=[1, 1.65], wspace=.28)
+            1, 2, width_ratios=[1, 1.65], wspace=.22)
         ax = fig.add_subplot(card[0, 0])
         metric = fig.add_subplot(card[0, 1])
         ax.set_box_aspect(1)
