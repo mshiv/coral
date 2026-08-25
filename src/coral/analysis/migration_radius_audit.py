@@ -79,6 +79,9 @@ def run(a):
         connected_fixed = ranked(np.where(connected, scores[r], 0), nref, a.seed)
         union = np.count_nonzero(fixed | reference_fixed)
         intersection = np.count_nonzero(fixed & reference_fixed)
+        fixed_connected = np.count_nonzero(fixed & connected)
+        gated_union = np.count_nonzero(fixed | connected_fixed)
+        gated_intersection = np.count_nonzero(fixed & connected_fixed)
         lab, ncomp = ndimage.label(connected, structure=np.ones((3, 3), int))
         sizes = np.bincount(lab.ravel())[1:] if ncomp else np.array([], int)
         rows.append({
@@ -96,6 +99,10 @@ def run(a):
             "fixed_jaccard_reference": float(intersection / union) if union else 1.0,
             "connected_fixed_selected_ha": float(connected_fixed.sum() * area_cell_ha),
             "connected_fixed_shortfall_ha": float((nref - connected_fixed.sum()) * area_cell_ha),
+            "production_fixed_within_connected_ha": float(fixed_connected * area_cell_ha),
+            "production_fixed_within_connected_fraction": float(fixed_connected / max(fixed.sum(), 1)),
+            "production_vs_connected_fixed_jaccard": (
+                float(gated_intersection / gated_union) if gated_union else 1.0),
             "connected_components": int(ncomp),
             "largest_connected_patch_ha": float(sizes.max() * area_cell_ha) if sizes.size else 0.0,
         })
