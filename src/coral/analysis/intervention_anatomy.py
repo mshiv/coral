@@ -208,6 +208,9 @@ def _build_hub(records, dem, out, siting, cell_m):
         ax.set_box_aspect(1)
         ax.imshow(bg[sl], interpolation="nearest")
         local = component[sl]
+        ax.set_xlim(-.5, local.shape[1] - .5)
+        ax.set_ylim(local.shape[0] - .5, -.5)
+        ax.margins(0)
         if primary == "dem" and kind in ("floodwall", "road_raise"):
             ax.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=2.2)
             ax.contour(local.astype(float), levels=[.5], colors=[COLORS[kind]], linewidths=1.05)
@@ -215,9 +218,12 @@ def _build_hub(records, dem, out, siting, cell_m):
             ax.contourf(local.astype(float), levels=[.5, 1.5], colors=[COLORS[kind]], alpha=.72)
             ax.contour(local.astype(float), levels=[.5], colors=["#111111"], linewidths=.65)
         ax.set_xticks([]); ax.set_yticks([])
-        ax.set_title(f"({letter}) {LABELS[kind]} — {area/1e4:.1f} ha member\n"
-                     f"local {SHORT_FIELD[primary]} edit",
-                     fontsize=7.7, fontweight="bold", loc="left", pad=2)
+        pair_left = ax.get_position().x0
+        pair_top = max(ax.get_position().y1, metric.get_position().y1)
+        fig.text(pair_left, pair_top + .006,
+                 f"({letter}) {LABELS[kind]} — {area/1e4:.1f} ha member; "
+                 f"local {SHORT_FIELD[primary]} edit",
+                 fontsize=7.7, fontweight="bold", ha="left", va="bottom")
         for spine in ax.spines.values():
             spine.set_linewidth(1.5); spine.set_edgecolor(COLORS[kind])
 
