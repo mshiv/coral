@@ -17,6 +17,17 @@ CASES = [
 ]
 
 
+def retained_fraction(values):
+    """Undefined when the lowest-threshold integral is zero, not zero retention."""
+    import numpy as np
+    values = np.asarray(values, dtype=float)
+    if values.size == 0 or np.any(~np.isfinite(values)) or np.any(values < 0):
+        raise ValueError('Expected a nonempty sequence of finite nonnegative integrals')
+    if values[0] == 0:
+        return np.full_like(values, np.nan)
+    return values / values[0]
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--inputs', type=Path, required=True)
@@ -52,28 +63,50 @@ def main():
                 color='#c65b32', label='Peak-depth increase')
         ax.set_yticks(y, [r['label'] for r in selected]); ax.invert_yaxis()
         ax.set_xlabel('Area-integrated peak-depth change ($10^3$ m³)')
-        ax.text(0, 1.03, f'({letter})', transform=ax.transAxes, weight='bold')
+        ax.text(0, 1.03, f'({letter})  '+('4 m native grid' if prefix=='native4m' else '30 m regional grid'),
+                transform=ax.transAxes, weight='bold')
         ax.spines[['top', 'right']].set_visible(False)
         ax.grid(axis='x', alpha=.2); ax.set_axisbelow(True)
     axes[0].legend(loc='lower right', fontsize=9)
     for suffix in ['png', 'pdf']:
         fig.savefig(a.out_dir / ('coral_paired_summary.'+suffix), dpi=250)
     plt.close(fig)
-    fig, axes = plt.subplots(3, 3, figsize=(12, 9), layout='constrained')
-    for ax, (stem, label), letter in zip(axes.flat, CASES, 'abcdefghi'):
+    fig = plt.figure(figsize=(12, 10), layout='constrained')
+    grid = fig.add_gridspec(4, 3, height_ratios=[1, 1, 1, .16])
+    axes = [fig.add_subplot(grid[i,j]) for i in range(3) for j in range(3)]
+    for ax, (stem, label), letter in zip(axes, CASES, 'abcdefghi'):
         rr = sorted([r for r in rows if r['case'] == stem], key=lambda r:r['threshold_m'])
-        x = [r['threshold_m'] for r in rr]
+        x = [100*r['threshold_m'] for r in rr]
         reduction=np.asarray([r['benefit_m3'] for r in rr])
         increase=np.asarray([r['adverse_m3'] for r in rr])
-        ax.plot(x, reduction/(reduction[0] or 1), 'o-', color='#287ca4')
-        ax.plot(x, increase/(increase[0] or 1), 's--', color='#c65b32')
-        ax.set(xscale='log', xlabel='Threshold (m)',ylim=(-.03,1.30),
-               ylabel='Fraction retained from 0.005 m')
+        for values, style, color, name in [(reduction, 'o-', '#287ca4', 'Reduction'),
+                                          (increase, 's--', '#c65b32', 'Increase')]:
+            ax.plot(x, retained_fraction(values), style, color=color, label=name)
+        if reduction[0] == 0 or increase[0] == 0:
+            absent = '/'.join(name for name, values in [('Reduction', reduction), ('Increase', increase)]
+                              if values[0] == 0)
+            ax.text(.98, .45, absent+' absent at 0.5 cm\n(retained fraction undefined)',
+                    transform=ax.transAxes, fontsize=8, color='.35', ha='right')
+        ax.axvline(1, color='.65', lw=.8, ls=':', zorder=0)
+        ax.set(xscale='log', xlabel='Depth-change threshold (cm)',ylim=(-.03,1.30),
+               ylabel='Fraction of integral retained')
+        ax.set_xticks([.5, 1, 2, 5, 10], labels=['0.5', '1', '2', '5', '10'])
+        ax.set_xlim(.45, 11)
+        ax.minorticks_off()
         ax.set_yticks([0,.25,.5,.75,1])
         ax.text(.02,.98,f'({letter})',transform=ax.transAxes,va='top',weight='bold')
         ax.text(.98,.98,label+'\n'+('4 m' if stem.startswith('native') else '30 m'),
                 transform=ax.transAxes,ha='right',va='top',fontsize=9)
         ax.grid(alpha=.2)
+    legend_ax = fig.add_subplot(grid[3,:]); legend_ax.axis('off')
+    handles, labels = axes[0].get_legend_handles_labels()
+    legend_ax.legend(handles, labels, loc='center', ncol=2, frameon=False)
+    (a.out_dir/'paired_plot_definitions.json').write_text(json.dumps(dict(
+        summary_threshold_m=.01, normalization_threshold_m=.005,
+        normalization='Each direction normalized by its own integral; zero denominator undefined',
+        metric='Area-integrated differences of cellwise peak depths, not synchronous water volume',
+        selection='Individual cases, not ensemble means or intervention rankings',
+        suggested_placement='Supporting appendix'), indent=2))
     for suffix in ['png', 'pdf']:
         fig.savefig(a.out_dir / ('coral_paired_thresholds.'+suffix), dpi=250)
     plt.close(fig)

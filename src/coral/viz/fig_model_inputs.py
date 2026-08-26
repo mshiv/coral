@@ -22,6 +22,24 @@ from ..emulator.dataset import read_asc
 from .pinpoint_style import PALETTE, extent_of, panel_title
 
 
+def mask_to_dem(grid, dem):
+    """Display only finite field values on the active terrain grid; never fill gaps."""
+    if grid.shape != dem.shape:
+        raise ValueError('Field shape does not match DEM')
+    return np.where(np.isfinite(dem) & (dem > -9990) &
+                    np.isfinite(grid) & (grid > -9990), grid, np.nan)
+
+
+def display_extent(header, south=None):
+    """Optional axis-only crop. Source grids and all statistics retain their full extent."""
+    ext = list(extent_of(header))
+    if south is not None:
+        if not ext[2] <= south < ext[3]:
+            raise ValueError('Display south must lie inside the DEM latitude extent')
+        ext[2] = south
+    return ext
+
+
 def nlcd_on_dem(tif, dem_path):
     """NLCD class grid resampled onto the DEM grid by nearest neighbour, or None."""
     try:
@@ -51,13 +69,16 @@ def _mask_from_geojson(path, dem_path, prefixes=("E2EM", "E2SS", "E2FO")):
 
 
 def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
-          nwi=None, nlcd=None, sea_level=0.81, title="Model inputs", publication=False):
+          nwi=None, nlcd=None, sea_level=0.81, title="Model inputs", publication=False,
+          display_south=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     dem, h = read_asc(dem_path)
+    dem = mask_to_dem(dem, dem)
     ext = extent_of(h)
+    view = display_extent(h, display_south)
     land = np.isfinite(dem) & (dem > sea_level)
 
     panels = [(dem, "Terrain", "elevation (m NAVD88)", "terrain", None)]
@@ -76,30 +97,33 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
             g = loader(path)
         if g is None:
             return
-        g = np.where(np.isfinite(g) & (g > -9990), g, np.nan)
+        g = mask_to_dem(g, dem)
         panels.append((g, label, units, cmap, None))
 
     add(manning, "Roughness", "Manning n (s m$^{-1/3}$)", "YlGn")
-    add(infil, "Infiltration rate", "mm h$^{-1}$", "BrBG")
-    add(infilcap, "Infiltration capacity", "mm", "PuBu")
+    add(infil, "Infiltration rate", "Infiltration rate (mm h$^{-1}$)", "YlGnBu")
+    add(infilcap, "Infiltration capacity", "Infiltration storage capacity (mm)", "PuBu")
     add(chm, "Canopy height", "m", "Greens")
     if nlcd:
         g = nlcd_on_dem(nlcd, dem_path)
         if g is not None:
-            panels.append((g, "Land cover", "NLCD class", "tab20", None))
+            panels.append((mask_to_dem(g, dem), "Land cover", "NLCD class", "tab20", None))
     if nwi:
         g = _mask_from_geojson(nwi, dem_path)
         if g is not None:
-            panels.append((np.where(g > 0, 1.0, np.nan), "Tidal wetland",
+            panels.append((mask_to_dem(np.where(g > 0, 1.0, np.nan), dem), "Tidal wetland",
                            "vegetated marsh (NWI E2EM/E2SS/E2FO)", "summer", None))
 
     n = len(panels)
     ncol = (2 if n <= 4 else 3) if publication else min(4, n)
     nrow = int(np.ceil(n / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, 4.4 * nrow), squeeze=False)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.9 * ncol, 5.0 * nrow),
+                             squeeze=False, layout='constrained' if publication else None)
+    panel_records = []
 
     for k, (g, label, units, cmap, _) in enumerate(panels):
         ax = axes[k // ncol][k % ncol]
+        ax.set_facecolor('#eeeeee')  # distinguish unavailable cells from valid terrain
         if label == "Terrain":
             lo, hi = np.nanpercentile(dem[np.isfinite(dem)], [2, 98])
             im = ax.imshow(dem, extent=ext, origin="upper", cmap="terrain", vmin=lo, vmax=hi)
@@ -123,6 +147,8 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
                 hi = lo + 1e-6
             im = ax.imshow(g, extent=ext, origin="upper", cmap=cmap, vmin=lo, vmax=hi)
         ax.set_xticks([]); ax.set_yticks([])
+        ax.set(xlim=view[:2], ylim=view[2:])
+        ax.set_aspect(1 / np.cos(np.deg2rad((ext[2] + ext[3]) / 2)))
         for s in ax.spines.values():
             s.set_edgecolor(PALETTE["muted"]); s.set_linewidth(0.5)
         if publication:
@@ -132,7 +158,10 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
             panel_title(ax, "ABCDEFGH"[k], label, units)
         # A binary mask has nothing to scale, so a colourbar on it is noise.
         if label != "Tidal wetland":
-            cb = fig.colorbar(im, ax=ax, fraction=0.042, pad=0.02)
+            continuous = label != 'Land cover'
+            cb = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.035,
+                              orientation='horizontal' if publication else 'vertical',
+                              extend='both' if continuous else 'neither')
             cb.set_label(units if label != 'Land cover' else 'NLCD category code')
             if label == 'Land cover':
                 present = [i for i,c in enumerate(classes) if np.any(g == c)]
@@ -142,6 +171,9 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
         # silent gap in the physics.
         cov = float(np.isfinite(g).sum()) / max(int(np.isfinite(dem).sum()), 1)
         onland = float((np.isfinite(g) & land).sum()) / max(int(land.sum()), 1)
+        panel_records.append(dict(parameter=label, valid_fraction_of_active_dem=cov,
+                                  valid_fraction_of_land=onland,
+                                  color_limits=list(map(float, im.get_clim()))))
         if publication:
             continue
         wording = 'mapped habitat in' if label == 'Tidal wetland' else 'valid data over'
@@ -152,8 +184,8 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
     for k in range(n, nrow * ncol):
         axes[k // ncol][k % ncol].axis("off")
 
-    fig.subplots_adjust(wspace=0.10, hspace=0.22, top=0.92)
     if not publication:
+        fig.subplots_adjust(wspace=0.30, hspace=0.22, top=0.92)
         fig.suptitle(title, fontsize=15, y=0.98, color=PALETTE["text"])
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=250, bbox_inches="tight", facecolor="white")
@@ -164,7 +196,11 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
             dem=dem_path,manning=manning,infil=infil,infilcap=infilcap,
             chm=chm,nwi=nwi,nlcd=nlcd).items() if v},
         display='continuous fields clipped to 2nd–98th percentiles; NLCD categorical',
-        panels=[v[1] for v in panels]), indent=2))
+        panels=[v[1] for v in panels], panel_statistics=panel_records,
+        full_extent=list(ext), displayed_extent=view, display_only_crop=view != list(ext),
+        inactive_dem_cells=int((~np.isfinite(dem)).sum()),
+        masking='All fields masked to active DEM; light grey is unavailable/inactive',
+        statistics_extent='full source grid, unaffected by display crop'), indent=2))
     plt.close(fig)
     print(f"wrote {out}  ({n} panels)")
 
@@ -183,10 +219,11 @@ def main():
     ap.add_argument("--title", default="Model inputs")
     ap.add_argument("--out", default="reports/figs/fig6_model_inputs.png")
     ap.add_argument('--publication', action='store_true')
+    ap.add_argument('--display-south', type=float, help='Axis-only southern latitude crop; does not edit input rasters')
     a = ap.parse_args()
     build(a.dem, a.out, manning=a.manning, infil=a.infil, infilcap=a.infilcap,
           chm=a.chm, nwi=a.nwi, nlcd=a.nlcd, sea_level=a.sea_level, title=a.title,
-          publication=a.publication)
+          publication=a.publication, display_south=a.display_south)
 
 
 if __name__ == "__main__":

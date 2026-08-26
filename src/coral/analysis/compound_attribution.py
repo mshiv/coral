@@ -202,6 +202,9 @@ def _plot_effect(C, N, wet, args):
         caption_first(fig, ax)
     Path(args.out_fig).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out_fig, dpi=150)
+    if getattr(args,'publication',False):
+        fig.savefig(Path(args.out_fig).with_suffix('.pdf'), bbox_inches='tight')
+    plt.close(fig)
     print(f"wrote {args.out_fig}")
 
 
@@ -268,6 +271,9 @@ def dominance(args):
             caption_first(fig, [ax])
         Path(args.out_fig).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(args.out_fig, dpi=150)
+        if getattr(args,'publication',False):
+            fig.savefig(Path(args.out_fig).with_suffix('.pdf'), bbox_inches='tight')
+        plt.close(fig)
         print(f"wrote {args.out_fig}")
     return rep
 

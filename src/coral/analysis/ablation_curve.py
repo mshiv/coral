@@ -83,18 +83,29 @@ def metrics(depth, zone, cell_m):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root", required=True)
-    ap.add_argument("--dem", required=True)
+    ap.add_argument("--root")
+    ap.add_argument("--dem")
+    ap.add_argument('--from-json', help='Replot previously calculated rows without rereading simulations')
     ap.add_argument("--control", default=None,
                     help="the .max the ablation was staged from; the n=baseline slr=0 state "
                          "must reproduce it")
-    ap.add_argument("--waterline", type=float, required=True)
-    ap.add_argument("--mlw", type=float, required=True)
+    ap.add_argument("--waterline", type=float)
+    ap.add_argument("--mlw", type=float)
     ap.add_argument("--cell-m", type=float, default=30.0)
     ap.add_argument("--out", default="reports/figures/roughness_ablation.png")
     ap.add_argument("--out-json", default=None)
     ap.add_argument('--publication', action='store_true')
     a = ap.parse_args()
+
+    if a.from_json:
+        rows = json.loads(Path(a.from_json).read_text())
+        plot_rows(rows, a.out, a.publication)
+        from coral.analysis.chapter_figure_bundle import file_record
+        Path(a.out).with_suffix('.sources.json').write_text(json.dumps(dict(
+            source=file_record(a.from_json), operation='Replot only; no metrics recomputed'), indent=2))
+        return
+    if any(v is None for v in [a.root, a.dem, a.waterline, a.mlw]):
+        ap.error('Provide --from-json, or --root --dem --waterline --mlw')
 
     root = Path(a.root)
     manifest = json.load(open(root / "manifest.json"))
@@ -157,7 +168,11 @@ def main():
         Path(a.out_json).write_text(json.dumps(rows, indent=2))
         print(f"\nwrote {a.out_json}")
 
-    # ---- figure: response against roughness, one line per sea level
+    plot_rows(rows, a.out, a.publication)
+
+
+def plot_rows(rows, out, publication=False):
+    """Plot saved statistics unchanged; area-integrated maxima are not stored volume."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -165,10 +180,10 @@ def main():
     slrs = sorted({r["slr_m"] for r in rows})
     panels = [("land above MHW", "p90_m", "land depth p90 (m)"),
               ("land above MHW", "area_ge_0.3m_km2", "land area >0.3 m (km$^2$)"),
-              ("land above MHW", "volume_m3", "land flood volume (m$^3$)"),
+              ("land above MHW", "volume_m3", "Integrated peak depth (m$^3$)"),
               ("marsh platform (MLW to MHW)", "p90_m", "platform depth p90 (m)")]
     fig, ax = plt.subplots(1, 4, figsize=(19, 4.4))
-    cmap = plt.get_cmap("viridis")
+    colors = ['#0072B2', '#D55E00', '#009E73', '#CC79A7']
     for j, (zn, key, lab) in enumerate(panels):
         for i, s in enumerate(slrs):
             pts = sorted([(r["n"], r[zn][key]) for r in rows
@@ -177,7 +192,7 @@ def main():
             if len(pts) < 2:
                 continue
             x, y = zip(*pts)
-            ax[j].plot(x, y, "o-", color=cmap(i / max(len(slrs) - 1, 1)),
+            ax[j].plot(x, y, "o-", color=colors[i % len(colors)],
                        label=f"SLR {s:.2f} m", lw=1.6, ms=4)
         ax[j].set_xscale("log")
         # Explicit ticks: log minor labels collide at five closely spaced states and the axis
@@ -194,12 +209,19 @@ def main():
     fig.text(0.5, 0.005, "A flat line means still-water peak depth in this regime is insensitive "
              "to marsh friction across the plotted range.", ha="center", fontsize=9, color="0.4")
     fig.tight_layout(rect=[0, 0.03, 1, 0.94])
-    if a.publication:
+    if publication:
         from coral.viz.publication_style import caption_first
         caption_first(fig, ax)
-    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(a.out, dpi=150)
-    print(f"wrote {a.out}")
+        handles, labels = ax[0].get_legend_handles_labels()
+        ax[0].get_legend().remove()
+        fig.legend(handles, labels, loc='upper center', ncol=len(slrs), frameon=False)
+        fig.tight_layout(rect=[0, 0, 1, .91])
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300)
+    if publication:
+        fig.savefig(Path(out).with_suffix('.pdf'))
+    plt.close(fig)
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":

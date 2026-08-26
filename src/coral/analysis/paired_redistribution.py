@@ -134,7 +134,8 @@ def main():
                max(0, xx.min()-10):min(c.shape[1], xx.max()+11)]
     vmax = np.nanpercentile(np.r_[c[wet], x[wet]], 99) if wet.any() else 1
     for aa, z, title in zip(ax[:2], (c, x), ("Control peak depth", "Intervention peak depth")):
-        im = aa.imshow(np.where(land, z, np.nan)[sl], cmap="Blues", vmin=0, vmax=vmax)
+        im = aa.imshow(np.where(land, z, np.nan)[sl], cmap="Blues", vmin=0, vmax=vmax,
+                       interpolation='nearest')
         aa.set_title(title); aa.set_axis_off(); fig.colorbar(im, ax=aa, shrink=.75, label="m")
     material = wet & (np.abs(delta) > a.tol_m)
     v = np.nanpercentile(np.abs(delta[material]), 99) if material.any() else a.tol_m
@@ -146,10 +147,10 @@ def main():
     if not a.publication:
         ax[2].imshow(np.where(footprint[sl], 1.0, np.nan), cmap="Greys",
                      vmin=0, vmax=1, alpha=.16)
-    im = ax[2].imshow(display[sl], cmap="RdBu_r", vmin=-v, vmax=v)
+    im = ax[2].imshow(display[sl], cmap="RdBu_r", vmin=-v, vmax=v, interpolation='nearest')
     ax[2].set_title(f"Material depth change (|Δh| ≥ {a.tol_m:g} m)\n"
                     "faint gray = edited input footprint"); ax[2].set_axis_off()
-    fig.colorbar(im, ax=ax[2], shrink=.75, label="m")
+    fig.colorbar(im, ax=ax[2], shrink=.75, label="Intervention − control (m)", extend='both')
     labels = [f"{r['lo_km']:g}–{r['hi_km']:g}" if r['hi_km'] is not None
               else f">{r['lo_km']:g}" for r in radial]
     pos = np.arange(len(radial))
@@ -165,11 +166,18 @@ def main():
         caption_first(fig, ax)
     outf = Path(a.out_fig); outf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(outf, dpi=180, bbox_inches="tight")
+    if a.publication:
+        fig.savefig(outf.with_suffix('.pdf'), bbox_inches='tight')
+    report['display'] = dict(error_limit_m=float(v), display_threshold_m=a.tol_m,
+        clipped_fraction_of_material_cells=float(np.mean(np.abs(delta[material]) > v)) if material.any() else 0.,
+        raster_interpolation='nearest', edit_overlay=not a.publication)
+    outj.write_text(json.dumps(report, indent=2)+'\n')
     if a.export_npz:
         Path(a.export_npz).parent.mkdir(parents=True,exist_ok=True)
         np.savez_compressed(a.export_npz,control=c,intervention=x,delta=delta,
             land=land,wet=wet,footprint=footprint,metadata_json=np.asarray(json.dumps(report)))
     print(json.dumps(report, indent=2)); print(f"wrote {outj}\nwrote {outf}")
+    plt.close(fig)
 
 
 if __name__ == "__main__":

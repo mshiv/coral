@@ -222,6 +222,9 @@ def build(runs, dem, out, *, max_quality=None, max_dem_diff=None, publication=Fa
         caption_first(fig, ax)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
+    if publication:
+        fig.savefig(Path(out).with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    plt.close(fig)
     print(f"\nwrote {out}")
     return stats
 

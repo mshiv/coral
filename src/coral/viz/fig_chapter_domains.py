@@ -10,6 +10,13 @@ import struct
 import numpy as np
 from coral.emulator.dataset import read_asc
 from coral.analysis.chapter_figure_bundle import file_record
+from coral.viz.fig_model_inputs import display_extent, mask_to_dem
+
+# Observational annotation, not a landfall inferred from the model or coastline.
+MATTHEW_US_LANDFALL = dict(
+    longitude=-79.4, latitude=33.0, utc='2016-10-08T15:00:00Z',
+    source='https://www.nhc.noaa.gov/archive/2016/al14/al142016.public.042.shtml',
+    description='Approximate US landfall location reported in NHC advisory 42')
 
 
 def bounds(h):
@@ -79,6 +86,8 @@ def main():
     for name in ['dem30','dem4','geoclaw-data','track','out']:
         p.add_argument('--'+name,required=True)
     p.add_argument('--coastline',type=Path,default=Path.home()/'.local/share/cartopy/shapefiles/natural_earth/physical/ne_50m_coastline.shp')
+    p.add_argument('--display-south', type=float,
+                   help='Crop local panel only; regional panel retains full domain outline')
     a = p.parse_args()
     if not a.coastline.is_file():
         p.error('Local coastline missing; supply --coastline PATH to a WGS84 coastline shapefile')
@@ -86,9 +95,13 @@ def main():
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
+    from matplotlib.ticker import MaxNLocator, FormatStrFormatter
     dem,h30 = read_asc(a.dem30)
     _,h4 = read_asc(a.dem4)
     b30,b4,bgeo = bounds(h30),bounds(h4),geoclaw_bounds(a.geoclaw_data)
+    view = display_extent(h30, a.display_south)
+    if view[2] > b4[2]:
+        raise ValueError('Display crop would cut off the 4 m nest')
     if not (b30[0]<=b4[0]<b4[1]<=b30[1] and b30[2]<=b4[2]<b4[3]<=b30[3]):
         raise ValueError('4 m DEM is not contained in the 30 m DEM')
     track = track_points(a.track)
@@ -100,12 +113,20 @@ def main():
     for xy in coastline_lines(a.coastline):
         ax.plot(xy[:,0],xy[:,1],color='.55',lw=.5)
     ax.plot(track[:,0],track[:,1],color='#9c3f5d',lw=1.7,label='Matthew BEST track')
+    lf = MATTHEW_US_LANDFALL
+    ax.plot(lf['longitude'], lf['latitude'], marker='*', ms=12,
+            color='#D55E00', mec='white', mew=.7, zorder=5)
+    ax.annotate('US landfall\n8 Oct, 15:00 UTC', (lf['longitude'], lf['latitude']),
+                xytext=(18, 28), textcoords='offset points', fontsize=9,
+                arrowprops=dict(arrowstyle='-', lw=.8, color='#444444'),
+                bbox=dict(fc='white', ec='none', alpha=.85, pad=2))
     rect(ax,bgeo,'#41677e','GeoClaw domain')
     rect(ax,b30,'#d27819','30 m Savannah domain')
     ax.set(xlim=(bgeo[0]-1,bgeo[1]+1),ylim=(bgeo[2]-1,bgeo[3]+1))
     ax.legend(loc='lower left',fontsize=9)
     ax = axes[1]
-    dem = np.where(dem<=-9990,np.nan,dem)
+    dem = mask_to_dem(dem, dem)
+    ax.set_facecolor('#eeeeee')
     lo,hi = np.nanpercentile(dem,[2,98])
     im=ax.imshow(dem,extent=b30,origin='upper',cmap='terrain',vmin=lo,vmax=hi)
     rect(ax,b4,'#842f5b','4 m Pin Point nest')
@@ -115,11 +136,15 @@ def main():
         ax.plot(x,y,'o',color='#202b33',ms=3)
         ax.annotate(name,(x,y),xytext=(dx,dy),textcoords='offset points',fontsize=10,
                     bbox=dict(fc='white',ec='none',alpha=.8,pad=1))
-    ax.set(xlim=b30[:2],ylim=b30[2:]); ax.legend(loc='lower left',fontsize=9)
+    ax.set(xlim=view[:2],ylim=view[2:]); ax.legend(loc='lower left',fontsize=9)
     fig.colorbar(im,ax=ax,shrink=.65,label='Elevation (m NAVD88)',extend='both')
     for i,ax in enumerate(axes):
         ax.set(xlabel='Longitude (°)',ylabel='Latitude (°)')
         ax.set_aspect(1/np.cos(np.deg2rad(32)))
+        ax.xaxis.set_major_locator(MaxNLocator(4))
+        ax.yaxis.set_major_locator(MaxNLocator(5))
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f' if i else '%.0f'))
+        ax.tick_params(labelsize=9)
         ax.text(.02,.98,f'({chr(97+i)})',transform=ax.transAxes,va='top',weight='bold',
                 bbox=dict(fc='white',ec='none',alpha=.85))
     Path(a.out).parent.mkdir(parents=True,exist_ok=True)
@@ -127,6 +152,9 @@ def main():
         fig.savefig(path,dpi=250)
     Path(a.out).with_suffix('.json').write_text(json.dumps(dict(
         bounds30=b30,bounds4=b4,geoclaw_bounds=bgeo,dem_display_percentiles=[2,98],
+        displayed_local_extent=view, display_only_crop=view != b30,
+        landfall_annotation=lf, inactive_dem_cells=int((~np.isfinite(dem)).sum()),
+        inactive_display_color='light grey; no data filled or source rasters cropped',
         sources=[file_record(v) for v in [a.dem30,a.dem4,a.geoclaw_data,a.track,a.coastline]]),indent=2))
     plt.close(fig)
 

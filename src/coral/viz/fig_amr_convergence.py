@@ -181,11 +181,13 @@ def plot_table(st, out, labels):
         raise ValueError('Expected nonempty seven-column AMR statistics CSV')
     st=st[np.argsort(st['lat'])]
     fig,ax=plt.subplots(1,3,figsize=(12,4.8),layout='constrained')
-    ax[0].plot(st['peak_c'],st['lat'],label=labels[0],color='.4')
-    ax[0].plot(st['peak_f'],st['lat'],label=labels[1],color='#267c9b')
+    # Latitude is a location coordinate, not a unique ordering along the boundary.
+    # Connecting these points invents segments between distinct gauge branches.
+    ax[0].scatter(st['peak_c'],st['lat'],label=labels[0],color='.4',s=7,alpha=.7)
+    ax[0].scatter(st['peak_f'],st['lat'],label=labels[1],color='#267c9b',s=7,alpha=.7)
     ax[0].set(xlabel='Peak water level (m)',ylabel='Latitude (°)'); ax[0].legend(fontsize=9)
     ax[1].axvline(0,color='.6',lw=.8)
-    ax[1].plot(st['dpeak'],st['lat'],color='#b25d32')
+    ax[1].scatter(st['dpeak'],st['lat'],color='#b25d32',s=7,alpha=.7)
     ax[1].set(xlabel='Fine − coarse peak level (m)',ylabel='Latitude (°)')
     x=np.sort(np.abs(st['dpeak']))
     ax[2].step(x,np.arange(1,len(x)+1)/len(x),where='post',color='#267c9b')

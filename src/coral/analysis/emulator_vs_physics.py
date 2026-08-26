@@ -37,13 +37,8 @@ def find_max(run_dir):
     return hits[0] if hits else None
 
 
-def pick_members(report, n_mid=1):
-    """Best, median and worst held-out members by RMSE, from the training report.
-
-    Reading the report rather than re-scoring keeps the figure consistent with the number the
-    chapter quotes: a member picked by a second, slightly different metric could disagree with
-    the reported ranking and invite a question about which is right.
-    """
+def report_members(report):
+    """Return the recorded metric population without running another evaluation."""
     # Training reports store metrics inside ``runs`` because one invocation can fit several
     # learning-curve models. External checkpoint evaluation writes one model and therefore
     # stores the same records at the report top level. Accept both without changing how
@@ -62,6 +57,12 @@ def pick_members(report, n_mid=1):
             break
     if not per:
         raise SystemExit("no per-member block in the report; cannot choose members")
+    return per
+
+
+def pick_members(report, n_mid=1):
+    """Best, median and worst held-out members by recorded RMSE, not rescored maps."""
+    per = report_members(report)
     key = next((k for k in ("rmse_m", "rmse", "wet_rmse", "RMSE") if k in per[0]), None)
     if key is None:
         raise SystemExit(f"no rmse field in per-member records: {list(per[0])}")
@@ -148,12 +149,16 @@ def main():
     fig.tight_layout(rect=[0, 0.012, 1, 0.97])
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150)
+    if a.publication:
+        fig.savefig(Path(a.out).with_suffix('.pdf'))
     if a.export_npz:
         Path(a.export_npz).parent.mkdir(parents=True, exist_ok=True)
         exported['metadata_json'] = np.asarray(json.dumps(dict(
             ckpt=str(Path(a.ckpt).resolve()), report=str(Path(a.report).resolve()),
             ensemble=str(Path(a.ens).resolve()), dem=str(Path(a.dem).resolve()),
-            waterline=a.waterline, members=metadata)))
+            waterline=a.waterline, members=metadata,
+            holdout_rmse_m=[float(r[chosen[0][2]]) for r in report_members(report)],
+            rmse_key=chosen[0][2])))
         np.savez_compressed(a.export_npz, **exported)
     print(f"wrote {a.out}")
 

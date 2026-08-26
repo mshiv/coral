@@ -91,7 +91,7 @@ def build(out):
         ax.add_patch(FancyArrowPatch(p, q, arrowstyle='-|>', mutation_scale=13,
                                     linewidth=1.4, color='#52636d'))
     box(0, 4.8, 'Hurricane Matthew (2016)', 'Track, wind and pressure\nRegional topobathymetry')
-    box(0, 2.7, 'Inland forcing', 'Astronomical tide + datum\nHourly AORC rainfall')
+    box(0, 2.7, 'Tide and rainfall', 'Astronomical tide + datum\nHourly AORC rainfall')
     box(0, .6, 'Landscape fields', 'Terrain and Manning roughness\nInfiltration rate and storage')
     box(1, 4.8, 'GeoClaw', 'Adaptive refinement: level 6\nDistributed surge residuals')
     box(1, 2.7, '30 m LISFLOOD-FP', 'Stage boundary + rainfall\nRegional estuary routing')
@@ -104,6 +104,10 @@ def build(out):
                  ((3.65,1.27),(4.23,1.27)), ((7.73,1.3),(8.37,2.9)),
                  ((10.1,2.65),(10.1,2.0))]:
         arrow(p,q)
+    # Shared landscape inputs also feed the regional solver. Route in the inter-row
+    # gap so this branch does not intersect the inland-forcing box or its arrow.
+    ax.plot([3.65,3.94,3.94,4.75], [1.68,1.68,2.36,2.36], color='#52636d', lw=1.4)
+    arrow((4.75,2.36), (4.75,2.66))
     # Route design to the fine-grid experiment without crossing the training arrow.
     ax.plot([11.85,12,12,6.9],[5.45,5.45,.25,.25],color='#a57026',lw=1.4,clip_on=False)
     ax.annotate('', xy=(6.9,.55), xytext=(6.9,.25),
