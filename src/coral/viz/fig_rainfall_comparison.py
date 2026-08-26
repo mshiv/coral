@@ -22,6 +22,7 @@ reader serves both.
 """
 from __future__ import annotations
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -32,13 +33,14 @@ from .pinpoint_style import PALETTE
 def _open(path):
     """(time, lat, lon, mm) from an AORC or MRMS file written by the fetchers."""
     import xarray as xr
-    ds = xr.open_dataset(path)
-    var = "APCP_surface" if "APCP_surface" in ds else list(ds.data_vars)[0]
-    da = ds[var]
-    lat = da["latitude"].values if "latitude" in da.coords else da["lat"].values
-    lon = da["longitude"].values if "longitude" in da.coords else da["lon"].values
-    lon = np.where(lon > 180, lon - 360, lon)
-    return da["time"].values, lat, lon, da.values
+    with xr.open_dataset(path) as ds:
+        if 'APCP_surface' not in ds:
+            raise ValueError('Expected archived hourly APCP_surface precipitation')
+        da = ds['APCP_surface']
+        lat = da["latitude"].values if "latitude" in da.coords else da["lat"].values
+        lon = da["longitude"].values if "longitude" in da.coords else da["lon"].values
+        lon = np.where(lon > 180, lon - 360, lon)
+        return da["time"].values.copy(), lat.copy(), lon.copy(), da.values.copy()
 
 
 def _site_series(lat, lon, arr, site):
@@ -49,7 +51,7 @@ def _site_series(lat, lon, arr, site):
 
 
 def build(out, *, aorc=None, mrms=None, site=(-81.0903, 31.9522), bbox=None,
-          site_label="Pin Point"):
+          site_label="Pin Point", publication=False):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -62,6 +64,14 @@ def build(out, *, aorc=None, mrms=None, site=(-81.0903, 31.9522), bbox=None,
             print(f"  {name}: not found at {p}, skipping")
     if not sets:
         raise SystemExit("neither product was readable")
+    common=next(iter(sets.values()))[0]
+    for t,_,_,_ in sets.values():
+        common=np.intersect1d(common,t)
+    if len(common)<2 or np.any(np.diff(common)!=np.timedelta64(1,'h')):
+        raise ValueError('Rainfall comparison needs common, contiguous hourly records')
+    for name,(t,lat,lon,arr) in list(sets.items()):
+        sets[name]=(common,lat,lon,arr[np.searchsorted(t,common)])
+    shared_max=max(float(np.nanmax(np.sum(arr,axis=0))) for _,_,_,arr in sets.values())
 
     ncol = len(sets) + (1 if len(sets) == 2 else 0)
     fig, axes = plt.subplots(2, max(ncol, 2), figsize=(5.0 * max(ncol, 2), 8.4),
@@ -73,12 +83,12 @@ def build(out, *, aorc=None, mrms=None, site=(-81.0903, 31.9522), bbox=None,
 
     totals, stats = {}, {}
     for k, (name, (t, lat, lon, a)) in enumerate(sets.items()):
-        tot = np.nansum(a, axis=0)
+        tot = np.sum(a, axis=0)  # incomplete time series remain missing, never zero rainfall
         totals[name] = (lat, lon, tot)
         ext = (lon.min(), lon.max(), lat.min(), lat.max())
         ax = axes[0, k]
         im = ax.imshow(tot, extent=ext, origin="upper" if lat[0] > lat[-1] else "lower",
-                       cmap="YlGnBu", vmin=0)
+                       cmap="YlGnBu", vmin=0, vmax=shared_max)
         ax.plot(*site, marker="*", ms=13, color=PALETTE["intervention"], zorder=5)
         if bbox:
             from matplotlib.patches import Rectangle
@@ -139,8 +149,24 @@ def build(out, *, aorc=None, mrms=None, site=(-81.0903, 31.9522), bbox=None,
              "makes at the site. The gap between colours is the error the product choice "
              "makes. Whichever is larger is the one worth fixing.",
              ha="center", fontsize=8.6, color=PALETTE["muted"])
+    if publication:
+        from coral.viz.publication_style import caption_first
+        caption_first(fig,[*axes[0,:],axts])
+        axts.set_xlabel('Hours since '+str(common[0])[:16].replace('T',' ')+' UTC')
+        for ax,name in zip(axes[0,:],list(sets)+(['MRMS − AORC'] if len(sets)==2 else [])):
+            ax.set_xlabel(name)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
+    if publication:
+        fig.savefig(Path(out).with_suffix('.pdf'),bbox_inches='tight')
+    from coral.analysis.chapter_figure_bundle import file_record
+    Path(out).with_suffix('.json').write_text(json.dumps(dict(
+        sources={name:file_record(p) for name,p in [('AORC',aorc),('MRMS',mrms)] if p},
+        common_first_record=str(common[0]),common_last_record=str(common[-1]),hourly_records=len(common),
+        totals={name:dict(domain_mean_mm=float(np.sum(dom)),site_mm=float(np.sum(loc)))
+                for name,(_,dom,loc) in stats.items()},
+        interpretation='Product comparison, not independent observational validation; means use each archived product footprint'),indent=2))
+    plt.close(fig)
     print(f"wrote {out}")
 
 
@@ -155,9 +181,10 @@ def main():
     ap.add_argument("--bbox", nargs=4, type=float, default=None,
                     metavar=("W", "E", "S", "N"), help="draw the model domain")
     ap.add_argument("--out", default="reports/figures/rain_comparison.png")
+    ap.add_argument('--publication',action='store_true')
     a = ap.parse_args()
     build(a.out, aorc=a.aorc, mrms=a.mrms, site=tuple(a.site),
-          site_label=a.site_label, bbox=a.bbox)
+          site_label=a.site_label, bbox=a.bbox, publication=a.publication)
 
 
 if __name__ == "__main__":
