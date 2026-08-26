@@ -170,11 +170,42 @@ def build(coarse_dir, fine_dir, out, *, labels=("coarse", "fine"), n_show=3,
     return st
 
 
+def plot_table(st, out, labels):
+    """Publication panels from saved statistics; no time-series reconstruction."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    st=np.atleast_1d(st)
+    required={'lat','peak_c','peak_f','dpeak','rmse','dmax','gid'}
+    if not required.issubset(st.dtype.names or ()) or not len(st):
+        raise ValueError('Expected nonempty seven-column AMR statistics CSV')
+    st=st[np.argsort(st['lat'])]
+    fig,ax=plt.subplots(1,3,figsize=(12,4.8),layout='constrained')
+    ax[0].plot(st['peak_c'],st['lat'],label=labels[0],color='.4')
+    ax[0].plot(st['peak_f'],st['lat'],label=labels[1],color='#267c9b')
+    ax[0].set(xlabel='Peak water level (m)',ylabel='Latitude (°)'); ax[0].legend(fontsize=9)
+    ax[1].axvline(0,color='.6',lw=.8)
+    ax[1].plot(st['dpeak'],st['lat'],color='#b25d32')
+    ax[1].set(xlabel='Fine − coarse peak level (m)',ylabel='Latitude (°)')
+    x=np.sort(np.abs(st['dpeak']))
+    ax[2].step(x,np.arange(1,len(x)+1)/len(x),where='post',color='#267c9b')
+    ax[2].set(xlabel='Absolute peak difference (m)',ylabel='Fraction of coupling gauges',ylim=(0,1.02))
+    for i,a in enumerate(ax):
+        a.text(.02,.98,f'({chr(97+i)})',transform=a.transAxes,va='top',weight='bold')
+        a.grid(alpha=.2)
+    Path(out).parent.mkdir(parents=True,exist_ok=True)
+    for path in [Path(out),Path(out).with_suffix('.pdf')]:
+        fig.savefig(path,dpi=250)
+    plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--coarse", required=True, help="_output of the lower-level run")
-    ap.add_argument("--fine", required=True, help="_output of the higher-level run")
+    ap.add_argument("--coarse", help="_output of the lower-level run")
+    ap.add_argument("--fine", help="_output of the higher-level run")
+    ap.add_argument('--from-csv', help='Read existing per-gauge statistics, without recomputing')
+    ap.add_argument('--publication', action='store_true')
     ap.add_argument("--labels", nargs=2, default=["level 6 (145 m)", "level 7 (36 m)"])
     ap.add_argument("--n-show", type=int, default=3)
     ap.add_argument("--window", nargs=2, type=float, default=None,
@@ -184,8 +215,19 @@ def main():
     ap.add_argument("--csv", default=None, help="also write the per-gauge table")
     ap.add_argument("--out", default="reports/figures/amr_convergence.png")
     a = ap.parse_args()
+    if a.from_csv:
+        if a.coarse or a.fine or a.window or a.csv:
+            ap.error('--from-csv cannot be combined with run/window/output-CSV options')
+        st=np.genfromtxt(a.from_csv,names=True,delimiter=',')
+        plot_table(st,a.out,a.labels)
+        print('CSV statistics replotted; analysis window must be documented from original run')
+        return
+    if not a.coarse or not a.fine:
+        ap.error('supply --coarse and --fine, or --from-csv')
     st = build(a.coarse, a.fine, a.out, labels=tuple(a.labels), n_show=a.n_show,
                window=tuple(a.window) if a.window else None)
+    if a.publication:
+        plot_table(st,a.out,a.labels)
     if a.csv:
         np.savetxt(a.csv, np.column_stack([st[n] for n in st.dtype.names]),
                    delimiter=",", header=",".join(st.dtype.names), comments="")

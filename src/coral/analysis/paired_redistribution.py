@@ -17,8 +17,8 @@ from .physics_ab import _read_grid
 
 def first(pattern):
     hits = sorted(glob.glob(pattern))
-    if not hits:
-        raise SystemExit(f"no files match {pattern}")
+    if len(hits) != 1:
+        raise SystemExit(f"expected exactly one maximum raster for {pattern}; found {len(hits)}")
     return hits[0]
 
 
@@ -43,6 +43,9 @@ def main():
     ap.add_argument("--wet-m", type=float, default=0.05)
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-fig", required=True)
+    ap.add_argument('--publication', action='store_true')
+    ap.add_argument('--error-limit', type=float, help='Explicit symmetric depth-change colour limit (m)')
+    ap.add_argument('--export-npz', help='Export clean paired fields for a mechanism composite')
     a = ap.parse_args()
 
     c = np.nan_to_num(read(first(str(Path(a.control_results) / "*.max"))), nan=0.0)
@@ -112,6 +115,12 @@ def main():
               "threshold_sensitivity": sensitivities,
               "max_reduction_m": float(-np.nanmin(delta)),
               "max_increase_m": float(np.nanmax(delta)), "distance_bins": radial}
+    report['provenance'] = dict(control_results=str(Path(a.control_results).resolve()),
+        intervention_results=str(Path(a.intervention_results).resolve()),
+        control_dem=str(Path(a.control_dem).resolve()), fields=a.fields,
+        waterline_m=a.waterline,nominal_cell_m=a.cell_m,
+        mask='baseline land above waterline, wet > wet_m in either maximum raster',
+        interpretation='area integral of differences of cellwise maxima; not synchronous volume')
     outj = Path(a.out_json); outj.parent.mkdir(parents=True, exist_ok=True)
     outj.write_text(json.dumps(report, indent=2) + "\n")
 
@@ -127,11 +136,16 @@ def main():
     for aa, z, title in zip(ax[:2], (c, x), ("Control peak depth", "Intervention peak depth")):
         im = aa.imshow(np.where(land, z, np.nan)[sl], cmap="Blues", vmin=0, vmax=vmax)
         aa.set_title(title); aa.set_axis_off(); fig.colorbar(im, ax=aa, shrink=.75, label="m")
-    material = wet & (np.abs(delta) >= a.tol_m)
+    material = wet & (np.abs(delta) > a.tol_m)
     v = np.nanpercentile(np.abs(delta[material]), 99) if material.any() else a.tol_m
+    if a.error_limit is not None:
+        if a.error_limit <= 0:
+            raise SystemExit('--error-limit must be positive')
+        v = a.error_limit
     display = np.where(material, delta, np.nan)
-    ax[2].imshow(np.where(footprint[sl], 1.0, np.nan), cmap="Greys",
-                 vmin=0, vmax=1, alpha=.16)
+    if not a.publication:
+        ax[2].imshow(np.where(footprint[sl], 1.0, np.nan), cmap="Greys",
+                     vmin=0, vmax=1, alpha=.16)
     im = ax[2].imshow(display[sl], cmap="RdBu_r", vmin=-v, vmax=v)
     ax[2].set_title(f"Material depth change (|Δh| ≥ {a.tol_m:g} m)\n"
                     "faint gray = edited input footprint"); ax[2].set_axis_off()
@@ -145,8 +159,16 @@ def main():
     ax[3].set_xlabel("distance from edited footprint (km)"); ax[3].set_ylabel("volume (10³ m³)")
     ax[3].set_title("Redistribution with distance"); ax[3].legend(frameon=False)
     fig.tight_layout()
+    if a.publication:
+        from coral.viz.publication_style import caption_first
+        ax[3].set_ylabel('Peak-depth integral (10³ m³)')
+        caption_first(fig, ax)
     outf = Path(a.out_fig); outf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(outf, dpi=180, bbox_inches="tight")
+    if a.export_npz:
+        Path(a.export_npz).parent.mkdir(parents=True,exist_ok=True)
+        np.savez_compressed(a.export_npz,control=c,intervention=x,delta=delta,
+            land=land,wet=wet,footprint=footprint,metadata_json=np.asarray(json.dumps(report)))
     print(json.dumps(report, indent=2)); print(f"wrote {outj}\nwrote {outf}")
 
 

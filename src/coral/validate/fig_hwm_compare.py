@@ -83,7 +83,7 @@ def skill(rows):
                 slope=slope, r=r, nse=(1.0 - sse / sst) if sst > 0 else np.nan)
 
 
-def build(runs, dem, out, *, max_quality=None, max_dem_diff=None):
+def build(runs, dem, out, *, max_quality=None, max_dem_diff=None, publication=False):
     """runs is [(label, mxe_path), ...]."""
     import matplotlib
     matplotlib.use("Agg")
@@ -217,6 +217,9 @@ def build(runs, dem, out, *, max_quality=None, max_dem_diff=None):
              "record. NSE at or below 0 means it carries no more information than a constant "
              "at the observed mean, whatever its RMSE.",
              ha="center", fontsize=8.6, color=PALETTE["muted"])
+    if publication:
+        from coral.viz.publication_style import caption_first
+        caption_first(fig, ax)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"\nwrote {out}")
@@ -235,6 +238,7 @@ def main():
                     help="drop marks whose surveyed elevation differs from the DEM by more "
                          "than this; the calibration used 1.0")
     ap.add_argument("--out", default="reports/figures/hwm_compare.png")
+    ap.add_argument('--publication', action='store_true')
     a = ap.parse_args()
     runs = []
     for spec in a.runs:
@@ -243,7 +247,7 @@ def main():
         label, path = spec.split(":", 1)
         runs.append((label, path))
     build(runs, a.dem, a.out, max_quality=a.max_quality,
-          max_dem_diff=a.max_dem_diff)
+          max_dem_diff=a.max_dem_diff, publication=a.publication)
 
 
 if __name__ == "__main__":

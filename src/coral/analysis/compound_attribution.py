@@ -197,6 +197,9 @@ def _plot_effect(C, N, wet, args):
 
     fig.suptitle("Compound effect against nonlinear residual", fontsize=13)
     fig.tight_layout()
+    if getattr(args,'publication',False):
+        from coral.viz.publication_style import caption_first
+        caption_first(fig, ax)
     Path(args.out_fig).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out_fig, dpi=150)
     print(f"wrote {args.out_fig}")
@@ -260,6 +263,9 @@ def dominance(args):
             loc="lower left", frameon=False)
         ax.set_title("Which driver accounts for the flood, cell by cell", fontsize=12)
         fig.tight_layout()
+        if getattr(args,'publication',False):
+            from coral.viz.publication_style import caption_first
+            caption_first(fig, [ax])
         Path(args.out_fig).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(args.out_fig, dpi=150)
         print(f"wrote {args.out_fig}")
@@ -284,6 +290,7 @@ def main():
         p.add_argument("--cell-m", type=float, default=30.0, help="grid resolution, m")
         p.add_argument("--out-json", default=None)
         p.add_argument("--out-fig", default=None)
+        p.add_argument('--publication', action='store_true')
 
     e = sub.add_parser("effect", help="C and N, with N stratified by elevation band")
     common(e, True)

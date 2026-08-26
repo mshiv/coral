@@ -80,6 +80,8 @@ def main():
     ap.add_argument("--waterline", type=float, required=True)
     ap.add_argument("--threshold", type=float, default=0.10)
     ap.add_argument("--out", default="reports/figures/emulator_vs_physics.png")
+    ap.add_argument('--export-npz', help='Save selected raw fields for cross-holdout composites')
+    ap.add_argument('--publication', action='store_true')
     a = ap.parse_args()
 
     import sys
@@ -103,17 +105,21 @@ def main():
     DIV = LinearSegmentedColormap.from_list("err", ["#2c7fb8", "#ffffff", "#a63f22"])
 
     fig, ax = plt.subplots(len(chosen), 3, figsize=(13.5, 4.0 * len(chosen)), squeeze=False)
+    exported, metadata = {'land': land}, []
     for i, (label, rec, key) in enumerate(chosen):
         name = rec.get("name") or rec.get("member")
         e = manifest.get(name)
         if e is None:
-            continue
+            raise SystemExit(f'selected member missing from manifest: {name}')
         truth = np.nan_to_num(rd(find_max(e["run_dir"])), nan=0.0)
         sample = build_manifest([e], skip_missing=True)[0]
         pred = np.asarray(predict(model, stats, sample, device), dtype=float)
         if pred.shape != truth.shape:
             raise SystemExit(f"prediction {pred.shape} does not match parent {truth.shape}")
         err = np.where(land, pred - truth, np.nan)
+        exported.update({f'{label}_truth':truth, f'{label}_prediction':pred,
+                         f'{label}_error':err})
+        metadata.append(dict(selection=label, name=name, rmse_m=float(rec[key])))
         v = float(np.nanpercentile(np.where(land, truth, np.nan), 99)) or 0.5
         e99 = float(np.nanpercentile(np.abs(err[np.isfinite(err)]), 99.5)) or 0.05
 
@@ -126,17 +132,29 @@ def main():
                  "emulator minus parent", DIV, dict(vmin=-e99, vmax=e99))]):
             im = ax[i][j].imshow(arr, cmap=cm, interpolation="none", **kw)
             ax[i][j].set_xticks([]); ax[i][j].set_yticks([])
-            ax[i][j].set_title(f"{label}: {ttl}" if j == 0 else ttl, fontsize=10)
+            if a.publication:
+                ax[i][j].text(.02,.98,f'({chr(97+3*i+j)})', transform=ax[i][j].transAxes,
+                              va='top',weight='bold')
+            else:
+                ax[i][j].set_title(f"{label}: {ttl}" if j == 0 else ttl, fontsize=10)
             fig.colorbar(im, ax=ax[i][j], fraction=0.046,
                          label="depth (m)" if j < 2 else "error (m)")
         ax[i][2].set_xlabel(f"{name}   RMSE {rec[key]:.3f} m", fontsize=8.5, color="0.35")
 
-    fig.suptitle("Emulator prediction against the parent model, on held-out members", fontsize=13)
-    fig.text(0.5, 0.005, "Blue: emulator shallower than the parent.  Red: deeper.",
-             ha="center", fontsize=9, color="0.4")
+    if not a.publication:
+        fig.suptitle("Emulator prediction against the parent model, on held-out members", fontsize=13)
+        fig.text(0.5, 0.005, "Blue: emulator shallower than the parent.  Red: deeper.",
+                 ha="center", fontsize=9, color="0.4")
     fig.tight_layout(rect=[0, 0.012, 1, 0.97])
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150)
+    if a.export_npz:
+        Path(a.export_npz).parent.mkdir(parents=True, exist_ok=True)
+        exported['metadata_json'] = np.asarray(json.dumps(dict(
+            ckpt=str(Path(a.ckpt).resolve()), report=str(Path(a.report).resolve()),
+            ensemble=str(Path(a.ens).resolve()), dem=str(Path(a.dem).resolve()),
+            waterline=a.waterline, members=metadata)))
+        np.savez_compressed(a.export_npz, **exported)
     print(f"wrote {a.out}")
 
 

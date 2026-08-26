@@ -93,6 +93,7 @@ def main():
     ap.add_argument("--cell-m", type=float, default=30.0)
     ap.add_argument("--out", default="reports/figures/roughness_ablation.png")
     ap.add_argument("--out-json", default=None)
+    ap.add_argument('--publication', action='store_true')
     a = ap.parse_args()
 
     root = Path(a.root)
@@ -193,6 +194,9 @@ def main():
     fig.text(0.5, 0.005, "A flat line means still-water peak depth in this regime is insensitive "
              "to marsh friction across the plotted range.", ha="center", fontsize=9, color="0.4")
     fig.tight_layout(rect=[0, 0.03, 1, 0.94])
+    if a.publication:
+        from coral.viz.publication_style import caption_first
+        caption_first(fig, ax)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150)
     print(f"wrote {a.out}")

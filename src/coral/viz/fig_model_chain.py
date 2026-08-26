@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse
 
 
-def build(out):
+def _legacy_build(out):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -66,6 +66,53 @@ def build(out):
     fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
     fig.savefig(Path(out).with_suffix(".pdf"), bbox_inches="tight", facecolor="white")
     print(f"wrote {out}")
+
+
+def build(out):
+    """Current chapter scope; no multi-storm capability or drainage implied."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+    fig, ax = plt.subplots(figsize=(12, 7))
+    ax.set(xlim=(0, 12), ylim=(0, 7)); ax.axis('off')
+    centers = [1.9, 6, 10.1]
+    colors = ['#e8f1f3', '#e8efe6', '#faeedb']
+    for x, title in zip(centers, ['(a) Fixed event and landscape',
+                                '(b) Linked physics models', '(c) Scenario emulation']):
+        ax.text(x, 6.7, title, ha='center', fontsize=12, weight='bold')
+    def box(col, y, title, body):
+        x = centers[col]
+        ax.add_patch(FancyBboxPatch((x-1.7, y), 3.4, 1.35, boxstyle='round,pad=.04',
+                     facecolor=colors[col], edgecolor='#53636d', linewidth=.9))
+        ax.text(x, y+1.06, title, ha='center', va='center', fontsize=11, weight='bold')
+        ax.text(x, y+.51, body, ha='center', va='center', fontsize=10, linespacing=1.35)
+    def arrow(p, q):
+        ax.add_patch(FancyArrowPatch(p, q, arrowstyle='-|>', mutation_scale=13,
+                                    linewidth=1.4, color='#52636d'))
+    box(0, 4.8, 'Hurricane Matthew (2016)', 'Track, wind and pressure\nRegional topobathymetry')
+    box(0, 2.7, 'Inland forcing', 'Astronomical tide + datum\nHourly AORC rainfall')
+    box(0, .6, 'Landscape fields', 'Terrain and Manning roughness\nInfiltration rate and storage')
+    box(1, 4.8, 'GeoClaw', 'Adaptive refinement: level 6\nDistributed surge residuals')
+    box(1, 2.7, '30 m LISFLOOD-FP', 'Stage boundary + rainfall\nRegional estuary routing')
+    box(1, .6, '4 m Pin Point nest', 'Nested forcing + physical edits\nPhysics peak-depth labels')
+    box(2, 4.8, 'Scenario design', 'Sea-level offsets and placements\nSingle edits and combinations')
+    box(2, 2.7, 'U-Net training', 'Nine raster input channels\nOne peak-depth output field')
+    box(2, .6, 'Conditional evaluation', 'Member, family, portfolio holdouts\nForcing and design stress tests')
+    for p, q in [((3.65,5.47),(4.23,5.47)), ((6,4.75),(6,4.10)),
+                 ((3.65,3.37),(4.23,3.37)), ((6,2.65),(6,2.0)),
+                 ((3.65,1.27),(4.23,1.27)), ((7.73,1.3),(8.37,2.9)),
+                 ((10.1,2.65),(10.1,2.0))]:
+        arrow(p,q)
+    # Route design to the fine-grid experiment without crossing the training arrow.
+    ax.plot([11.85,12,12,6.9],[5.45,5.45,.25,.25],color='#a57026',lw=1.4,clip_on=False)
+    ax.annotate('', xy=(6.9,.55), xytext=(6.9,.25),
+                arrowprops=dict(arrowstyle='-|>',color='#a57026',lw=1.4))
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    for path in (Path(out), Path(out).with_suffix('.pdf')):
+        fig.savefig(path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f'wrote {out}')
 
 
 def main():

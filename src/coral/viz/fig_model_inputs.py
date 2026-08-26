@@ -13,6 +13,7 @@ and the 30 m Savannah domain. Anything missing is skipped rather than faked.
 """
 from __future__ import annotations
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -50,7 +51,7 @@ def _mask_from_geojson(path, dem_path, prefixes=("E2EM", "E2SS", "E2FO")):
 
 
 def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
-          nwi=None, nlcd=None, sea_level=0.81, title="Model inputs"):
+          nwi=None, nlcd=None, sea_level=0.81, title="Model inputs", publication=False):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -62,9 +63,17 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
     panels = [(dem, "Terrain", "elevation (m NAVD88)", "terrain", None)]
 
     def add(path, label, units, cmap, loader=read_asc):
-        if not path or not Path(path).exists():
+        if not path:
             return
-        g = loader(path)[0] if loader is read_asc else loader(path)
+        if not Path(path).is_file():
+            raise FileNotFoundError(path)
+        if loader is read_asc:
+            g, gh = loader(path)
+            for key in ('ncols', 'nrows', 'xllcorner', 'yllcorner', 'cellsize'):
+                if not np.isclose(gh[key], h[key], rtol=0, atol=1e-10):
+                    raise ValueError(f'{path}: {key} does not match DEM')
+        else:
+            g = loader(path)
         if g is None:
             return
         g = np.where(np.isfinite(g) & (g > -9990), g, np.nan)
@@ -85,7 +94,7 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
                            "vegetated marsh (NWI E2EM/E2SS/E2FO)", "summer", None))
 
     n = len(panels)
-    ncol = min(4, n)
+    ncol = (2 if n <= 4 else 3) if publication else min(4, n)
     nrow = int(np.ceil(n / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, 4.4 * nrow), squeeze=False)
 
@@ -94,6 +103,19 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
         if label == "Terrain":
             lo, hi = np.nanpercentile(dem[np.isfinite(dem)], [2, 98])
             im = ax.imshow(dem, extent=ext, origin="upper", cmap="terrain", vmin=lo, vmax=hi)
+        elif label == 'Land cover':
+            from matplotlib.colors import ListedColormap, BoundaryNorm
+            classes = [11,12,21,22,23,24,31,41,42,43,51,52,71,72,73,74,81,82,90,95]
+            colors = ['#466b9f','#d1def8','#dec5c5','#d99282','#eb0000','#ab0000',
+                      '#b3ac9f','#68ab5f','#1c5f2c','#b5c58f','#af963c','#ccb879',
+                      '#dfdfc2','#d1d182','#a3cc51','#82ba9e','#dcd939','#ab6c28',
+                      '#b8d9eb','#6c9fb8']
+            mapped = np.full(g.shape, np.nan)
+            for idx, code in enumerate(classes):
+                mapped[g == code] = idx
+            cmap = ListedColormap(colors)
+            im = ax.imshow(mapped, extent=ext, origin='upper', cmap=cmap,
+                           norm=BoundaryNorm(np.arange(21)-.5,20), interpolation='nearest')
         else:
             v = g[np.isfinite(g)]
             lo, hi = (np.nanpercentile(v, [2, 98]) if v.size else (0, 1))
@@ -103,16 +125,27 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
         ax.set_xticks([]); ax.set_yticks([])
         for s in ax.spines.values():
             s.set_edgecolor(PALETTE["muted"]); s.set_linewidth(0.5)
-        panel_title(ax, "ABCDEFGH"[k], label, units)
+        if publication:
+            ax.text(.02,.98,f'({chr(97+k)})', transform=ax.transAxes,va='top',
+                    weight='bold',fontsize=12,bbox=dict(fc='white',ec='none',alpha=.8))
+        else:
+            panel_title(ax, "ABCDEFGH"[k], label, units)
         # A binary mask has nothing to scale, so a colourbar on it is noise.
         if label != "Tidal wetland":
             cb = fig.colorbar(im, ax=ax, fraction=0.042, pad=0.02)
-            cb.ax.tick_params(labelsize=6.5)
+            cb.set_label(units if label != 'Land cover' else 'NLCD category code')
+            if label == 'Land cover':
+                present = [i for i,c in enumerate(classes) if np.any(g == c)]
+                cb.set_ticks(present, labels=[str(classes[i]) for i in present])
+            cb.ax.tick_params(labelsize=9 if publication else 6.5)
         # Coverage matters as much as the values: a grid that is mostly nodata over land is a
         # silent gap in the physics.
         cov = float(np.isfinite(g).sum()) / max(int(np.isfinite(dem).sum()), 1)
         onland = float((np.isfinite(g) & land).sum()) / max(int(land.sum()), 1)
-        ax.text(0.02, 0.02, f"covers {cov:.0%} of grid, {onland:.0%} of land",
+        if publication:
+            continue
+        wording = 'mapped habitat in' if label == 'Tidal wetland' else 'valid data over'
+        ax.text(0.02, 0.02, f"{wording} {cov:.0%} of grid, {onland:.0%} of land",
                 transform=ax.transAxes, fontsize=7, color=PALETTE["text"],
                 bbox=dict(fc="white", ec="none", alpha=0.75, pad=2))
 
@@ -120,9 +153,19 @@ def build(dem_path, out, *, manning=None, infil=None, infilcap=None, chm=None,
         axes[k // ncol][k % ncol].axis("off")
 
     fig.subplots_adjust(wspace=0.10, hspace=0.22, top=0.92)
-    fig.suptitle(title, fontsize=15, y=0.98, color=PALETTE["text"])
+    if not publication:
+        fig.suptitle(title, fontsize=15, y=0.98, color=PALETTE["text"])
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=140, bbox_inches="tight", facecolor="white")
+    fig.savefig(out, dpi=250, bbox_inches="tight", facecolor="white")
+    if publication:
+        fig.savefig(Path(out).with_suffix('.pdf'), bbox_inches='tight', facecolor='white')
+    Path(out).with_suffix('.json').write_text(json.dumps(dict(
+        grid=h, sources={k: str(Path(v).resolve()) for k,v in dict(
+            dem=dem_path,manning=manning,infil=infil,infilcap=infilcap,
+            chm=chm,nwi=nwi,nlcd=nlcd).items() if v},
+        display='continuous fields clipped to 2nd–98th percentiles; NLCD categorical',
+        panels=[v[1] for v in panels]), indent=2))
+    plt.close(fig)
     print(f"wrote {out}  ({n} panels)")
 
 
@@ -139,9 +182,11 @@ def main():
     ap.add_argument("--sea-level", type=float, default=0.81)
     ap.add_argument("--title", default="Model inputs")
     ap.add_argument("--out", default="reports/figs/fig6_model_inputs.png")
+    ap.add_argument('--publication', action='store_true')
     a = ap.parse_args()
     build(a.dem, a.out, manning=a.manning, infil=a.infil, infilcap=a.infilcap,
-          chm=a.chm, nwi=a.nwi, nlcd=a.nlcd, sea_level=a.sea_level, title=a.title)
+          chm=a.chm, nwi=a.nwi, nlcd=a.nlcd, sea_level=a.sea_level, title=a.title,
+          publication=a.publication)
 
 
 if __name__ == "__main__":
