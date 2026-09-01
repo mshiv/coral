@@ -101,7 +101,7 @@ def evaluate(model, dataset, device, thresh=0.10, workers=0, cell_m=None):
 
 def train(dataset, val=None, *, epochs=200, lr=1e-3, base=32, tail_gamma=1.0,
           device=None, ckpt="emulator_unet.pt", workers=0, eval_every=5,
-          patience=None, history=None, log=print):
+          patience=None, history=None, log=print, seed=0):
     """Fit the U-Net. `workers` sets DataLoader workers, which matter once the dataset is
     lazy: each sample re-reads several ASCII grids, so without workers the GPU waits on I/O.
     `patience` stops early when the validation RMSE has not improved for that many
@@ -113,12 +113,16 @@ def train(dataset, val=None, *, epochs=200, lr=1e-3, base=32, tail_gamma=1.0,
     from torch.utils.data import DataLoader
     from .models import UNet
 
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     in_ch = dataset[0][0].shape[0]
     model = UNet(in_channels=in_ch, base=base).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    generator = torch.Generator().manual_seed(seed)
     dl = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=workers,
-                    persistent_workers=bool(workers))
+                    persistent_workers=bool(workers), generator=generator)
     vdl = (DataLoader(val, batch_size=1, num_workers=workers,
                       persistent_workers=bool(workers)) if val is not None else None)
 
