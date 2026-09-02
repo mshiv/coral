@@ -1,8 +1,9 @@
 """Evaluate emulator accuracy near interventions and for paired intervention responses.
 
-This is an evaluation-only command: it never updates model weights.  It preserves the
-member names in an existing training report, predicts those members and their corresponding
-same-sea-level baselines, and writes one row per member and distance buffer.
+This is an evaluation-only command: it never updates model weights.  It either preserves
+the member names in an existing training report or evaluates every intervention member in
+an external ensemble, pairs each with its same-sea-level baseline, and writes one row per
+member and distance buffer.
 
 The two central diagnostics are:
 
@@ -45,6 +46,13 @@ def _member_blocks(report):
             if isinstance(block, list) and block:
                 return block
     raise ValueError("selection report contains no per-member holdout block")
+
+
+def selected_member_names(entries, report=None):
+    """Select report members, or every non-baseline member for an external ensemble."""
+    if report is not None:
+        return [str(x["name"]) for x in _member_blocks(report) if x.get("name")]
+    return [str(x["name"]) for x in entries if x.get("interventions")]
 
 
 def _level_key(entry):
@@ -151,8 +159,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--manifest", required=True)
-    ap.add_argument("--selection-report", required=True,
-                    help="training report whose original holdout member names are preserved")
+    ap.add_argument("--selection-report", default=None,
+                    help=("training report whose original holdout member names are preserved; "
+                          "omit to evaluate every non-baseline member in an external manifest"))
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-csv", required=True)
     ap.add_argument("--cache", default=None)
@@ -174,12 +183,15 @@ def main():
     from coral.emulator.inference import load_model
 
     manifest_path = Path(args.manifest)
-    report_path = Path(args.selection_report)
     entries = json.loads(manifest_path.read_text())
-    report = json.loads(report_path.read_text())
-    selected_names = [str(x["name"]) for x in _member_blocks(report) if x.get("name")]
+    report_path = Path(args.selection_report) if args.selection_report else None
+    report = json.loads(report_path.read_text()) if report_path else None
+    selected_names = selected_member_names(entries, report)
     if args.limit:
         selected_names = selected_names[:args.limit]
+    if not selected_names:
+        source = "selection report" if report_path else "external manifest"
+        raise ValueError(f"no intervention members selected from {source}")
     selected_set = set(selected_names)
     entry_by_name = {str(x["name"]): x for x in entries}
     absent = selected_set - set(entry_by_name)
@@ -293,7 +305,9 @@ def main():
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "checkpoint": str(Path(args.ckpt).resolve()),
         "manifest": str(manifest_path.resolve()),
-        "selection_report": str(report_path.resolve()),
+        "selection_report": str(report_path.resolve()) if report_path else None,
+        "selection": ("members named in the selection report" if report_path else
+                      "all non-baseline members in the external manifest"),
         "evaluation_only": True,
         "n_selected_members": len(selected_names),
         "radii_m": [float(x) for x in args.radii_m],

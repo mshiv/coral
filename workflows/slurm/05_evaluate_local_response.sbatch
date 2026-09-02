@@ -7,6 +7,7 @@
 #   sbatch workflows/slurm/05_evaluate_local_response.sbatch siting_targeted
 #   sbatch workflows/slurm/05_evaluate_local_response.sbatch holdout_kind_floodwall
 #   sbatch workflows/slurm/05_evaluate_local_response.sbatch holdout_kind_living_shoreline
+#   sbatch workflows/slurm/05_evaluate_local_response.sbatch perkind pp4_ood none ood_perkind
 #
 # This does not train or alter the checkpoint.
 #SBATCH --job-name=coral-local-response
@@ -23,7 +24,7 @@ set -euo pipefail
 
 CORAL_ROOT=${CORAL_ROOT:-/storage/home/hcoda1/6/smurugan9/data/dev/coral}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/storage/scratch1/6/smurugan9/coral}
-STEM=${1:?usage: 05_evaluate_local_response.sbatch <checkpoint-stem>}
+STEM=${1:?usage: 05_evaluate_local_response.sbatch <checkpoint-stem> [ensemble] [selection-report|none] [output-stem]}
 ENSEMBLE=${2:-pp4_e01}
 
 # The code checkout has historically lived under home while the retained checkpoints live on
@@ -51,8 +52,22 @@ test -n "$REPORT_ROOT" || {
 
 OUTDIR="$REPORT_ROOT/local_response"
 CHECKPOINT="$REPORT_ROOT/emulator_unet_${STEM}.pt"
-SELECTION="$REPORT_ROOT/emulator_unet_${STEM}.report.json"
-MANIFEST="$SCRATCH_ROOT/runs/$ENSEMBLE/manifest.json"
+SELECTION=${3:-$REPORT_ROOT/emulator_unet_${STEM}.report.json}
+OUTPUT_STEM=${4:-$STEM}
+if [ -n "${EMULATOR_MANIFEST:-}" ]; then
+  MANIFEST="$EMULATOR_MANIFEST"
+else
+  MANIFEST=""
+  for candidate in \
+    "$SCRATCH_ROOT/runs/$ENSEMBLE/manifest.json" \
+    "/storage/home/hcoda1/6/smurugan9/scratch/coral/runs/$ENSEMBLE/manifest.json"
+  do
+    if [ -s "$candidate" ]; then
+      MANIFEST="$candidate"
+      break
+    fi
+  done
+fi
 CACHE="$SCRATCH_ROOT/interim/grid_cache_${ENSEMBLE}"
 
 module load anaconda3 cuda 2>/dev/null
@@ -61,12 +76,17 @@ cd "$CORAL_ROOT"
 export PYTHONPATH="$CORAL_ROOT/src:${PYTHONPATH:-}"
 
 test -s "$CHECKPOINT" || { echo "missing checkpoint: $CHECKPOINT"; exit 1; }
-test -s "$SELECTION" || { echo "missing selection report: $SELECTION"; exit 1; }
-test -s "$MANIFEST" || { echo "missing manifest: $MANIFEST"; exit 1; }
+if [ "$SELECTION" != none ]; then
+  test -s "$SELECTION" || { echo "missing selection report: $SELECTION"; exit 1; }
+fi
+test -n "$MANIFEST" || { echo "missing manifest for ensemble: $ENSEMBLE"; exit 1; }
 mkdir -p "$OUTDIR" "$CACHE"
 
 EXTRA_ARGS=()
 OUTPUT_SUFFIX=""
+if [ "$SELECTION" != none ]; then
+  EXTRA_ARGS+=(--selection-report "$SELECTION")
+fi
 if [ -n "${LIMIT:-}" ]; then
   EXTRA_ARGS+=(--limit "$LIMIT")
   OUTPUT_SUFFIX="_smoke${LIMIT}"
@@ -76,7 +96,6 @@ fi
 python -u -m coral.analysis.emulator_local_response \
   --ckpt "$CHECKPOINT" \
   --manifest "$MANIFEST" \
-  --selection-report "$SELECTION" \
   --cache "$CACHE" \
   --cell-m 4 \
   --radii-m 50 100 250 \
@@ -84,7 +103,7 @@ python -u -m coral.analysis.emulator_local_response \
   --response-threshold 0.01 \
   --analysis-elevation-cutoff 0.81 \
   "${EXTRA_ARGS[@]}" \
-  --out-json "$OUTDIR/${STEM}${OUTPUT_SUFFIX}.json" \
-  --out-csv "$OUTDIR/${STEM}${OUTPUT_SUFFIX}.csv"
+  --out-json "$OUTDIR/${OUTPUT_STEM}${OUTPUT_SUFFIX}.json" \
+  --out-csv "$OUTDIR/${OUTPUT_STEM}${OUTPUT_SUFFIX}.csv"
 
-echo "completed $STEM"
+echo "completed $OUTPUT_STEM"

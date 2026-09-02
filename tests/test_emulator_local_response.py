@@ -4,6 +4,7 @@ from coral.analysis.emulator_local_response import (
     _error_stats,
     intervention_footprint,
     local_masks,
+    selected_member_names,
 )
 
 
@@ -42,3 +43,12 @@ def test_error_stats_report_tail_and_maximum():
     assert np.isclose(stats["bias_m"], 0.0)
     assert np.isclose(stats["rmse_m"], np.sqrt(2 / 3))
     assert np.isclose(stats["max_abs_m"], 1.0)
+
+
+def test_external_manifest_selection_excludes_baselines():
+    entries = [
+        {"name": "Base2016_000", "interventions": []},
+        {"name": "Base2016_001", "interventions": [{"kind": "floodwall"}]},
+        {"name": "Int2050_001", "interventions": [{"kind": "depave"}]},
+    ]
+    assert selected_member_names(entries) == ["Base2016_001", "Int2050_001"]
