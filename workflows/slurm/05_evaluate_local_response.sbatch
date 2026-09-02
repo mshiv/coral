@@ -14,8 +14,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH -p gpu-a100
-#SBATCH --gres=gpu:a100:1
+#SBATCH -p cpu-small
 #SBATCH --mem=48G
 #SBATCH --time=06:00:00
 #SBATCH --output=coral-local-response_%j.log
